@@ -71,6 +71,11 @@ def test_generated_index_exact() -> None:
     assert not is_generated(CONCEPTS_INDEX)
 
 
+def test_generated_index_with_only_subfolders_has_single_blank_line() -> None:
+    out = render_generated_index("Work", [], [Entry("Sub", "Sub/index.md", None)], root=False)
+    assert out == "# Work\n\n# Subfolders\n\n* [Sub](Sub/index.md)\n\n<!-- okf-migrate:generated -->\n"
+
+
 def test_root_generated_index_frontmatter() -> None:
     out = render_generated_index("Vault", [Entry("a", "a.md", None)], [], root=True)
     assert out.startswith('---\nokf_version: "0.2"\n---\n\n# Vault\n\n')

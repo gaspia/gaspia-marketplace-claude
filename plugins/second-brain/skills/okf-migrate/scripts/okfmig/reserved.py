@@ -86,7 +86,7 @@ def render_generated_index(title: str, notes: list[Entry], subfolders: list[Entr
     for e in sorted(notes, key=lambda e: e.title.casefold()):
         out += render_entry(e) + "\n"
     if subfolders:
-        out += "\n# Subfolders\n\n"
+        out += ("\n" if notes else "") + "# Subfolders\n\n"
         for e in sorted(subfolders, key=lambda e: e.title.casefold()):
             out += render_entry(e) + "\n"
     return out + f"\n{GENERATED_MARKER}\n"
