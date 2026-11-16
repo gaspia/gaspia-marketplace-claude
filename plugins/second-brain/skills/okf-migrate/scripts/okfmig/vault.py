@@ -77,7 +77,7 @@ def discover(root: Path, extra_excludes: Sequence[str] = ()) -> Vault:
                 excluded.append(rel)
                 continue
             try:
-                text = (here / name).read_text(encoding="utf-8")
+                text = (here / name).read_bytes().decode("utf-8")
             except UnicodeDecodeError:
                 undecodable.append(rel)
                 continue

@@ -3,7 +3,7 @@
 import re
 
 _FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-_INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
+_INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)", re.DOTALL)
 _TAG = re.compile(r"(?<!\S)#([\w/-]+)")
 
 

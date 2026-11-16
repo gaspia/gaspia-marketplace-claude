@@ -66,3 +66,14 @@ def test_code_ranges_and_inline_tags() -> None:
     assert in_ranges(body.index("#code"), ranges)
     assert in_ranges(body.index("#fenced"), ranges)
     assert not in_ranges(body.index("#real"), ranges)
+
+
+def test_note_text_roundtrips_crlf_and_bom(make_vault: MakeVault) -> None:
+    vault = discover(make_vault({"crlf.md": b"a\r\nb\r\n", "bom.md": b"\xef\xbb\xbf---\r\n---\r\n"}))
+    texts = {n.path.name: n.text for n in vault.notes}
+    assert texts["crlf.md"] == "a\r\nb\r\n"
+    assert texts["bom.md"].startswith("﻿")
+
+
+def test_inline_code_does_not_span_blank_line() -> None:
+    assert "real" in inline_tags("`unclosed\n\n#real\n\nlater `x`")
