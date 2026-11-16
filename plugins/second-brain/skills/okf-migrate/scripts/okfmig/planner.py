@@ -52,6 +52,7 @@ class Plan:
     nonkebab_types: list[dict] = field(default_factory=list)
     renames: dict[str, str] = field(default_factory=dict)
     stale_indexes: list[str] = field(default_factory=list)
+    preexisting_broken: list[dict] = field(default_factory=list)
     excluded: list[str] = field(default_factory=list)
     types_assigned: dict[str, dict] = field(default_factory=dict)
     counts: dict[str, int] = field(default_factory=dict)
@@ -114,6 +115,7 @@ class _Planner:
         notes = [(n, n.path) for n in self.vault.notes]
         notes.extend(self._reserved())
         self.resolver = Resolver(self.vault.files, self.vault.settings.new_file_folder)
+        self._preexisting_broken()
         for note, new_path in sorted(notes, key=lambda item: item[1]):
             self._note(note, new_path)
         for log in self.logs:
@@ -126,6 +128,13 @@ class _Planner:
         self.plan.renames = {str(k): str(v) for k, v in sorted(self.renames.items())}
         self.plan.counts = self._counts()
         return self.plan
+
+    def _preexisting_broken(self) -> None:
+        """Local markdown links that are already broken before migration (left as they are)."""
+        for note in sorted([*self.vault.notes, *self.vault.reserved], key=lambda n: n.path):
+            for target in sorted(linked_paths(parse(note.text).body, note.path)):
+                if str(target).lower() not in self.on_disk:
+                    self.plan.preexisting_broken.append({"file": str(note.path), "target": str(target)})
 
     def _reserved(self) -> list[tuple[Note, PurePosixPath]]:
         lower_files = {str(f).lower() for f in self.vault.files}

@@ -300,3 +300,19 @@ def test_curated_index_in_attachments_only_folder_untouched(make_vault: Callable
     assert not {"A/B/index.md", "A/index.md"} & paths
     assert plan.stale_indexes == []
     assert "# Subfolders" not in _ops(plan)["index.md"].new_content
+
+
+def test_preexisting_broken_links_recorded(make_vault: Callable) -> None:
+    files = {
+        "a.md": "---\ntype: note\n---\nOld [gone](Gone%20Note.md#H) and [ok](b.md) and `[c](Code.md)` [w](https://x.y).\n",
+        "b.md": "[[Never]]\n",
+        "Work/index.md": "# Work\n\n- [x](missing.md)\n",
+    }
+    root = make_vault(files)
+    plan = _plan(root, TypeConfig(default="note"), files)
+    assert plan.preexisting_broken == [
+        {"file": "Work/index.md", "target": "Work/missing.md"},
+        {"file": "a.md", "target": "Gone Note.md"},
+    ]
+    assert "- a.md: Gone Note.md" in render_plan_md(plan)
+    assert plan_from_json(plan_to_json(plan)) == plan

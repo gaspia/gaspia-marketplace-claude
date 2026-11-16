@@ -18,8 +18,8 @@ def test_unknown_vault_exits_2(capsys):
     assert "/nonexistent" in capsys.readouterr().err
 
 
-def test_existing_vault_stub_exits_0(make_vault):
-    assert main(["scan", str(make_vault({"a.md": "x"}))]) == 0
+def test_scan_outside_git_repo_exits_2(make_vault):
+    assert main(["scan", str(make_vault({"a.md": "x"}))]) == 2
 
 
 def test_fixtures_write_str_and_bytes(make_vault):

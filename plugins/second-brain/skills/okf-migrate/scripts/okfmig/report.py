@@ -172,6 +172,7 @@ def render_plan_md(plan: Plan) -> str:
         f"- Ambiguous links: {len(plan.ambiguous)}",
         f"- Unresolved links: {len(plan.unresolved)}",
         f"- Stale generated indexes: {len(plan.stale_indexes)}",
+        f"- Broken links already present: {len(plan.preexisting_broken)}",
     ]
     by_type: dict[str, list[str]] = {}
     for path, info in sorted(plan.types_assigned.items()):
@@ -203,6 +204,10 @@ def render_plan_md(plan: Plan) -> str:
     )
     lines += _section("Indexes", [f"- {op.action} {op.path}" for op in index_ops])
     lines += _section("Stale generated indexes (delete by hand)", [f"- {p}" for p in plan.stale_indexes])
+    lines += _section(
+        "Broken links already present (left as they are)",
+        [f"- {i['file']}: {i['target']}" for i in plan.preexisting_broken],
+    )
     lines += _section("Excluded (outside bundle)", [f"- {p}" for p in plan.excluded])
     lines += _section("Files changed", files)
     return "\n".join(lines).rstrip("\n") + "\n"
