@@ -15,6 +15,7 @@ _DATE_HEADING_RE = re.compile(r"^##[ \t]+(\d{4}-\d{2}-\d{2})[ \t]*$")
 _UNDATED_HEADING_RE = re.compile(r"^##[ \t]+Undated[ \t]*$")
 _UNLISTED_RE = re.compile(r"^#[ \t]+Unlisted[ \t]*$")
 _ANY_HEADING_RE = re.compile(r"^#{1,6}[ \t]")
+_TOP_HEADING_RE = re.compile(r"^#{1,2}[ \t]")
 _H1_RE = re.compile(r"^#[ \t]+\S")
 _LIST_ITEM_RE = re.compile(r"^[-*+][ \t]")
 _LINK_ITEM_RE = re.compile(r"^[ \t]*[-*+][ \t]+.*(\[[^\]]*\]\([^)]*\)|\[\[[^\]]+\]\])")
@@ -178,18 +179,36 @@ def _collect_groups(lines: list[str], nl: str) -> tuple[dict[str, list[str]], li
             current = None
         elif item:
             block = [f"* {item.group(2)}{_ending(line, nl)}"]
-            while i + 1 < len(lines) and _is_child(lines[i + 1]):
-                i += 1
-                block.append(lines[i])
+            end = _item_end(lines, i)
+            block.extend(lines[i + 1 : end])
+            i = end - 1
             groups.setdefault(item.group(1), []).extend(block)
-        elif current is not None:
+        elif current is not None and not _TOP_HEADING_RE.match(text_line):
             if not (_is_blank(line) and after_heading):
                 groups[current].append(line)
                 after_heading = False
         else:
+            current = None
             undated.append(line)
         i += 1
     return groups, undated
+
+
+def _item_end(lines: list[str], i: int) -> int:
+    """Index one past the last child/continuation line of the item at lines[i]."""
+    j = i + 1
+    while j < len(lines):
+        if _is_child(lines[j]):
+            j += 1
+            continue
+        k = j
+        while k < len(lines) and _is_blank(lines[k]):
+            k += 1
+        if k > j and k < len(lines) and _is_child(lines[k]) and lines[k][0] in " \t":
+            j = k + 1
+            continue
+        break
+    return j
 
 
 def _is_child(line: str) -> bool:

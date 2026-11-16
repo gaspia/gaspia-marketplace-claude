@@ -151,3 +151,20 @@ def test_add_log_entry() -> None:
     out2 = add_log_entry(out, today, "* b")
     assert out2 == "# Log\n\n## 2026-11-16\n\n* a\n* b\n\n## 2026-11-05\n\n* old\n"
     assert add_log_entry("# Log\n", today, "* a") == "# Log\n\n## 2026-11-16\n\n* a\n"
+
+
+def test_regroup_non_date_heading_ends_date_section() -> None:
+    text = "# Log\n\n## 2026-11-05\n\n* a\n\n## Ideas\n\nsome idea\n\n### Sub\n\n* x\n"
+    out = regroup_log(text)
+    assert out == "# Log\n\n## 2026-11-05\n\n* a\n\n## Undated\n\n## Ideas\n\nsome idea\n\n### Sub\n\n* x\n"
+    assert regroup_log(out) == out
+
+
+def test_regroup_multi_paragraph_item_stays_with_parent() -> None:
+    text = "# Log\n\n- 2026-11-01: a\n\n  more para of a\n\n  and more\n- 2026-11-02: b\n\nprose\n"
+    out = regroup_log(text)
+    assert out == (
+        "# Log\n\n## 2026-11-02\n\n* b\n\n## 2026-11-01\n\n* a\n\n  more para of a\n\n  and more\n\n"
+        "## Undated\n\nprose\n"
+    )
+    assert regroup_log(out) == out
