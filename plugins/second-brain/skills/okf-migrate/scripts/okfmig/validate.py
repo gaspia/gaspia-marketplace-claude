@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from okfmig.frontmatter import is_empty_value, parse
-from okfmig.links import linked_paths, wikilinks_in
+from okfmig.links import linked_paths, outside_links, wikilinks_in
 from okfmig.planner import Plan
 from okfmig.reserved import OKF_VERSION
 from okfmig.typerules import TypeConfig
@@ -73,6 +73,8 @@ def validate(
     for note, body in sorted(bodies, key=lambda item: item[0].path):
         for link in wikilinks_in(body):
             report.errors.append(f"{note.path}: wikilink {link}")
+        for rel in outside_links(body, note.path):
+            report.errors.append(f"{note.path}: link escapes the vault: {rel}")
         for target in sorted(linked_paths(body, note.path)):
             if (root / target).exists():
                 continue

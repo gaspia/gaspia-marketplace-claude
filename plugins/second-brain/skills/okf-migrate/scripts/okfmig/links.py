@@ -75,7 +75,15 @@ class Resolver:
             self._by_name.setdefault(f.name.lower(), []).append(f)
 
     def resolve(self, target: str, source: PurePosixPath) -> tuple[PurePosixPath | None, tuple[PurePosixPath, ...]]:
-        target = target.strip().lstrip("/")
+        target = target.strip()
+        if _is_relative(target):
+            # `./x` and `../x` name a vault path relative to the linking note's folder
+            for name in self._lookup_names(_normalize_relative(target, source)):
+                found = self._by_path.get(name.lower())
+                if found:
+                    return found[0], tuple(found)
+            return None, ()
+        target = target.lstrip("/")
         if not target:
             return None, ()
         for name in self._lookup_names(target):
@@ -124,9 +132,20 @@ def _split_wikilink(inner: str) -> tuple[str, str, str | None, str]:
     return target.strip(), heading.strip(), alias, separator
 
 
-def _unresolved_path(target: str, new_file_folder: PurePosixPath) -> PurePosixPath:
+def _is_relative(target: str) -> bool:
+    return target.startswith(("./", "../"))
+
+
+def _normalize_relative(target: str, source: PurePosixPath) -> str:
+    """Vault path of a `./` or `../` target, resolved against the linking note's folder."""
+    return posixpath.normpath(posixpath.join(str(source.parent), target))
+
+
+def _unresolved_path(target: str, new_file_folder: PurePosixPath, source: PurePosixPath) -> PurePosixPath:
     """Where Obsidian would create the note: the vault path for path targets, else the new-file folder."""
     is_vault_path = "/" in target
+    if _is_relative(target):
+        target = _normalize_relative(target, source)
     target = target.lstrip("/")
     path = PurePosixPath(target)
     if not _extension(target):
@@ -169,7 +188,7 @@ def rewrite_wikilinks(
             changes.append(LinkChange(original, replacement, "date", None))
             return replacement
         else:
-            path = _unresolved_path(target, resolver.new_file_folder)
+            path = _unresolved_path(target, resolver.new_file_folder, source)
             status = "unresolved"
 
         if embed:
@@ -240,19 +259,26 @@ def rewrite_md_targets(
     return _MD_LINK.sub(replace, body), changed
 
 
-def linked_paths(body: str, source: PurePosixPath) -> set[PurePosixPath]:
+def _local_links(body: str) -> list[str]:
+    """Decoded paths of the relative local markdown links outside code."""
     ranges = code_ranges(body)
-    paths: set[PurePosixPath] = set()
+    paths: list[str] = []
     for match in _MD_LINK.finditer(body):
         if in_ranges(match.start(), ranges):
             continue
         local = _local_target(match.group("target"))
-        if local is None:
-            continue
-        path = _vault_path(source, local[0])
-        if path is not None:
-            paths.add(path)
+        if local is not None:
+            paths.append(local[0])
     return paths
+
+
+def linked_paths(body: str, source: PurePosixPath) -> set[PurePosixPath]:
+    return {path for rel in _local_links(body) if (path := _vault_path(source, rel)) is not None}
+
+
+def outside_links(body: str, source: PurePosixPath) -> list[str]:
+    """Relative local link targets that climb out of the vault root."""
+    return [rel for rel in _local_links(body) if _vault_path(source, rel) is None]
 
 
 def wikilinks_in(text: str) -> list[str]:

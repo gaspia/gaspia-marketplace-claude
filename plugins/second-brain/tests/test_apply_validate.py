@@ -227,3 +227,10 @@ def test_apply_create_uses_umask(make_vault: Callable) -> None:
     assert _mode(root / "index.md") == 0o640
     assert _mode(root / "log.md") == 0o640
     assert _umask() == old
+
+
+def test_validate_reports_links_escaping_the_vault(make_vault: Callable) -> None:
+    root = _migrated(make_vault)
+    (root / "h.md").write_text("---\ntype: note\n---\n[up](../outside.md)\n", encoding="utf-8")
+    errors = validate(root, CFG, expected_unresolved={"Gone.md"}).errors
+    assert errors == ["h.md: link escapes the vault: ../outside.md"]

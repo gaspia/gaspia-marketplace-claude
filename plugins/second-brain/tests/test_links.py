@@ -8,6 +8,7 @@ from okfmig.links import (
     encode_anchor,
     encode_path,
     linked_paths,
+    outside_links,
     relative_href,
     rewrite_md_targets,
     rewrite_wikilinks,
@@ -222,3 +223,34 @@ def test_date_with_heading_stays_link() -> None:
     out, changes = rewrite("[[2026-11-09#Morning]]")
     assert out == "[2026-11-09 > Morning](../2026-11-09.md#Morning)"
     assert changes[0].status == "unresolved"
+
+
+def _rewrite_from(source: P, body: str, files: list[P], nff: P = ROOT):
+    return rewrite_wikilinks(body, source, Resolver(files, nff), {})
+
+
+def test_relative_wikilink_resolves_against_linking_folder() -> None:
+    files = [P("B/y.md"), P("A/x.md"), P("A/B/y.md")]
+    out, changes = _rewrite_from(P("A/x.md"), "[[../B/y]]", files)
+    assert out == "[../B/y](../B/y.md)"
+    assert changes[0].status == "resolved"
+    assert changes[0].target == P("B/y.md")
+
+
+def test_dot_slash_wikilink_is_case_insensitive_and_in_same_folder() -> None:
+    files = [P("A/Sub/Note.md"), P("Sub/note.md")]
+    out, changes = _rewrite_from(P("A/x.md"), "[[./sub/note|n]]", files)
+    assert out == "[n](Sub/Note.md)"
+    assert changes[0].status == "resolved"
+
+
+def test_unresolved_relative_wikilink_points_to_normalized_vault_path() -> None:
+    out, changes = _rewrite_from(P("A/x.md"), "[[../Missing]]", [P("A/x.md")], nff=P("Inbox"))
+    assert out == "[../Missing](../Missing.md)"
+    assert changes[0].status == "unresolved"
+    assert changes[0].target == P("Missing.md")
+
+
+def test_outside_links_reports_links_escaping_the_vault() -> None:
+    body = "[in](../B/y.md) [out](../../z.md) [ext](https://x.y) `[c](../../q.md)`"
+    assert outside_links(body, P("A/x.md")) == ["../../z.md"]
