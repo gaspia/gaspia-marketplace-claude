@@ -8,9 +8,9 @@
   },
   "plugins": [
     {
-      "name": "hello",
-      "source": "./plugins/hello",
-      "description": "Example plugin with a single greeting skill",
+      "name": "second-brain",
+      "source": "./plugins/second-brain",
+      "description": "Manage an Obsidian second brain in the Open Knowledge Format (OKF)",
       "version": "0.1.0"
     }
   ]
