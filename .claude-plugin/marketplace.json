@@ -1,0 +1,17 @@
+{
+  "name": "gaspia-marketplace",
+  "owner": {
+    "name": "gaspia"
+  },
+  "metadata": {
+    "description": "Gaspia's personal Claude Code plugin marketplace"
+  },
+  "plugins": [
+    {
+      "name": "hello",
+      "source": "./plugins/hello",
+      "description": "Example plugin with a single greeting skill",
+      "version": "0.1.0"
+    }
+  ]
+}
