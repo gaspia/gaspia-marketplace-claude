@@ -5,7 +5,6 @@ import re
 from dataclasses import dataclass
 
 from ruamel.yaml import YAML
-from ruamel.yaml.error import YAMLError
 from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
 BOM = "﻿"
@@ -53,7 +52,7 @@ def _split(text: str) -> _Block | None:
 def _load(inner: str) -> tuple[dict | None, str | None]:
     try:
         data = YAML(typ="safe").load(inner)
-    except YAMLError as exc:
+    except Exception as exc:
         return None, str(exc)
     if data is None:
         return {}, None
@@ -74,17 +73,27 @@ def is_empty_value(v: object) -> bool:
     return v is None or (isinstance(v, str) and not v.strip())
 
 
+def _round_trips(probe: YAML, source: str, value: str, key: str | None = None) -> bool:
+    try:
+        loaded = probe.load(source)
+        if key is not None:
+            loaded = loaded.get(key)
+    except Exception:
+        return False
+    return loaded == value and isinstance(loaded, str)
+
+
 def _render(key: str, value: str) -> str:
     probe = YAML(typ="safe")
     scalar: str = value
-    if probe.load(value) != value:
+    if not _round_trips(probe, value, value):
         scalar = SingleQuotedScalarString(value)
     yaml = YAML(typ="rt")
     yaml.width = 1_000_000
     buf = io.StringIO()
     yaml.dump({key: scalar}, buf)
     line = buf.getvalue().rstrip("\n")
-    if probe.load(line).get(key) != value:
+    if not _round_trips(probe, line, value, key):
         buf = io.StringIO()
         yaml.dump({key: SingleQuotedScalarString(value)}, buf)
         line = buf.getvalue().rstrip("\n")
@@ -97,8 +106,9 @@ def ensure_fields(text: str, fields: dict[str, str]) -> str:
         if not fields:
             return text
         bom = BOM if text.startswith(BOM) else ""
-        lines = "".join(_render(k, v) + "\n" for k, v in fields.items())
-        return f"{bom}---\n{lines}---\n{text[len(bom) :]}"
+        nl = "\r\n" if "\r\n" in text else "\n"
+        lines = "".join(_render(k, v) + nl for k, v in fields.items())
+        return f"{bom}---{nl}{lines}---{nl}{text[len(bom) :]}"
 
     data, error = _load(block.inner)
     if data is None or error:
@@ -107,14 +117,17 @@ def ensure_fields(text: str, fields: dict[str, str]) -> str:
     inner = block.inner
     for key, value in fields.items():
         if key in data:
-            if not is_empty_value(data[key]) and data[key] != "":
+            if not is_empty_value(data[key]):
                 continue
             pattern = re.compile(
-                rf"^{re.escape(key)}[ \t]*:[ \t]*(?:\"\"|''|null|Null|NULL|~)?[ \t]*(?:#.*)?(\r?\n|$)", re.MULTILINE
+                rf"^{re.escape(key)}[ \t]*:[ \t]*(?:\"[ \t]*\"|'[ \t]*'|null|Null|NULL|~)?"
+                r"([ \t]+#[^\r\n]*)?[ \t]*(\r?\n|$)",
+                re.MULTILINE,
             )
             m = pattern.search(inner)
-            if m:
-                inner = inner[: m.start()] + _render(key, value) + m.group(1) + inner[m.end() :]
+            if not m:
+                raise ValueError(f"cannot fill empty frontmatter key {key!r} in place: not a simple top-level line")
+            inner = inner[: m.start()] + _render(key, value) + (m.group(1) or "") + m.group(2) + inner[m.end() :]
             continue
         if inner and not inner.endswith("\n"):
             inner += nl

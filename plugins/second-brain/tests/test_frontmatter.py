@@ -57,9 +57,23 @@ def test_crlf_and_bom() -> None:
     assert ensure_fields(text, {"type": "note"}) == f"{BOM}---\r\nGoal: x\r\ntype: note\r\n---\r\nbody\r\n"
 
 
-@pytest.mark.parametrize(
-    "t", ["M2. O11 Infras: Portfolios", "Chat with Architect - João", "#tag-like", "yes", "2026-11-09"]
-)
+TITLES = [
+    "M2. O11 Infras: Portfolios",
+    "Chat with Architect - João",
+    "#tag-like",
+    "yes",
+    "2026-11-09",
+    "`code` thing",
+    "@mention",
+    "*Star",
+    "[WIP",
+    "%x",
+    "!bang",
+    "{a",
+]
+
+
+@pytest.mark.parametrize("t", TITLES)
 def test_special_titles_round_trip(t: str) -> None:
     title = parse(ensure_fields("", {"title": t})).data["title"]  # type: ignore[index]
     assert isinstance(title, str)
@@ -104,3 +118,35 @@ def test_is_empty_value() -> None:
     assert not is_empty_value("x")
     assert not is_empty_value(0)
     assert not is_empty_value([])
+
+
+def test_nonyaml_error_reported_not_raised() -> None:
+    text = "---\nd: 2026-02-30\n---\nbody\n"
+    p = parse(text)
+    assert p.data is None
+    assert p.error
+    assert ensure_fields(text, {"type": "note"}) == text
+
+
+def test_fill_preserves_trailing_comment() -> None:
+    assert ensure_fields("---\ntype: # why\n---\n", {"type": "n"}) == "---\ntype: n # why\n---\n"
+
+
+def test_fill_preserves_crlf() -> None:
+    text = "---\r\ntype: # why\r\na: 1\r\n---\r\n"
+    assert ensure_fields(text, {"type": "n"}) == "---\r\ntype: n # why\r\na: 1\r\n---\r\n"
+
+
+@pytest.mark.parametrize("empty", ['type: " "', "type: ' '"])
+def test_fill_whitespace_only_quoted(empty: str) -> None:
+    assert ensure_fields(f"---\n{empty}\n---\n", {"type": "note"}) == "---\ntype: note\n---\n"
+
+
+def test_unmatched_empty_raises() -> None:
+    with pytest.raises(ValueError, match="type"):
+        ensure_fields("---\n{type: }\n---\n", {"type": "note"})
+
+
+def test_no_block_crlf_and_bom() -> None:
+    assert ensure_fields("# Hi\r\nbody\r\n", {"type": "note"}) == "---\r\ntype: note\r\n---\r\n# Hi\r\nbody\r\n"
+    assert ensure_fields(f"{BOM}# Hi\n", {"type": "note"}) == f"{BOM}---\ntype: note\n---\n# Hi\n"
