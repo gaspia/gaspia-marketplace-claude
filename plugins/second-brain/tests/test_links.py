@@ -202,3 +202,23 @@ def test_dotted_note_name_is_not_an_extension() -> None:
     assert changes[0].status == "unresolved"
     out, changes = rewrite("[[release v1.2]]", files=[*FILES, P("Notes/Release v1.2.md")])
     assert out == "[release v1.2](../Notes/Release%20v1.2.md)"
+
+
+def test_escaped_pipe_embed_in_table_keeps_escape() -> None:
+    out, _ = rewrite("| ![[img.png\\|300]] |")
+    assert out == "| ![img.png\\|300](attachments/img.png) |"
+    out, _ = rewrite("![[img.png|300]]")
+    assert out == "![img.png|300](attachments/img.png)"
+
+
+def test_unresolved_leading_slash_target() -> None:
+    out, changes = rewrite("[[/Ghost]]")
+    assert out == "[/Ghost](../Ghost.md)"
+    assert changes[0].status == "unresolved"
+    assert changes[0].target == P("Ghost.md")
+
+
+def test_date_with_heading_stays_link() -> None:
+    out, changes = rewrite("[[2026-11-09#Morning]]")
+    assert out == "[2026-11-09 > Morning](../2026-11-09.md#Morning)"
+    assert changes[0].status == "unresolved"

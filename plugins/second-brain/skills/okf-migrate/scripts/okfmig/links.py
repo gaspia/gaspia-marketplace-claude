@@ -113,21 +113,25 @@ def _escape_text(text: str) -> str:
     return text.replace("[", "\\[").replace("]", "\\]")
 
 
-def _split_wikilink(inner: str) -> tuple[str, str, str | None]:
-    """Split `target#heading|alias` (pipe may be `\\|`) into target, heading, alias."""
+def _split_wikilink(inner: str) -> tuple[str, str, str | None, str]:
+    """Split `target#heading|alias` into target, heading, alias and the separator used (`|` or `\\|`)."""
     alias: str | None = None
+    separator = "|"
     pipe = _PIPE.search(inner)
     if pipe:
-        inner, alias = inner[: pipe.start()], inner[pipe.end() :]
+        inner, alias, separator = inner[: pipe.start()], inner[pipe.end() :], pipe.group(0)
     target, _, heading = inner.partition("#")
-    return target.strip(), heading.strip(), alias
+    return target.strip(), heading.strip(), alias, separator
 
 
 def _unresolved_path(target: str, new_file_folder: PurePosixPath) -> PurePosixPath:
+    """Where Obsidian would create the note: the vault path for path targets, else the new-file folder."""
+    is_vault_path = "/" in target
+    target = target.lstrip("/")
     path = PurePosixPath(target)
     if not _extension(target):
         path = path.with_name(path.name + ".md")
-    if "/" in target:
+    if is_vault_path:
         return path
     return new_file_folder / path
 
@@ -146,7 +150,7 @@ def rewrite_wikilinks(
         if in_ranges(match.start(), ranges):
             return original
         embed = match.group(1) == "!"
-        target, heading, alias = _split_wikilink(match.group(2))
+        target, heading, alias, separator = _split_wikilink(match.group(2))
         anchor = "#" + encode_anchor(heading) if heading else ""
 
         if not target:
@@ -169,7 +173,7 @@ def rewrite_wikilinks(
             status = "unresolved"
 
         if embed:
-            text = target + (f"#{heading}" if heading else "") + (f"|{alias}" if alias is not None else "")
+            text = target + (f"#{heading}" if heading else "") + (f"{separator}{alias}" if alias is not None else "")
         elif alias is not None:
             text = alias
         elif heading and not heading.startswith("^"):
