@@ -316,3 +316,19 @@ def test_preexisting_broken_links_recorded(make_vault: Callable) -> None:
     ]
     assert "- a.md: Gone Note.md" in render_plan_md(plan)
     assert plan_from_json(plan_to_json(plan)) == plan
+
+
+@pytest.mark.parametrize(
+    ("body", "title"),
+    [
+        ("intro\n\n# Later heading\n", "Note"),
+        ("```bash\n# a comment\n```\n", "Note"),
+        ("# **Simplified 1:1 (O2O) **\n\ntext\n", "Simplified 1:1 (O2O)"),
+        ("\n# Real Title\n\ntext\n", "Real Title"),
+    ],
+)
+def test_title_from_leading_h1_else_stem(make_vault: Callable, body: str, title: str) -> None:
+    root = make_vault({"Note.md": body})
+    plan = _plan(root, TypeConfig(default="note"), {"Note.md": body})
+    op = next(o for o in plan.ops if o.path == "Note.md")
+    assert f"title: {title}\n" in op.new_content or f"title: '{title}'\n" in op.new_content

@@ -108,8 +108,33 @@ def test_strip_bom_crlf_and_no_block() -> None:
 
 
 def test_first_h1() -> None:
-    assert first_h1("text\n# Title \n## Sub\n") == "Title"
+    assert first_h1("\n\n# Title \n## Sub\n") == "Title"
+    assert first_h1("# Title\r\nbody\r\n") == "Title"
     assert first_h1("## Sub\n") is None
+
+
+def test_first_h1_only_when_first_non_blank_line() -> None:
+    assert first_h1("text\n# Title\n") is None
+
+
+def test_first_h1_ignores_code_fences() -> None:
+    assert first_h1("```\n# comment\n```\n") is None
+    assert first_h1("    # indented code\n") is None
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("# **Simplified 1:1 (O2O) **", "Simplified 1:1 (O2O)"),
+        ("# __Bold__", "Bold"),
+        ("# *Ital*", "Ital"),
+        ("# _Ital_ ", "Ital"),
+        ("# ****", None),
+        ("# a*b*", "a*b*"),
+    ],
+)
+def test_first_h1_strips_emphasis(line: str, expected: str | None) -> None:
+    assert first_h1(line + "\nbody\n") == expected
 
 
 def test_is_empty_value() -> None:

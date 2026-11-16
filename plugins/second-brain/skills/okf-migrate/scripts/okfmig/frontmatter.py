@@ -9,7 +9,8 @@ from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
 BOM = "﻿"
 _OPEN = re.compile(r"---[ \t]*(\r?\n)")
-_H1 = re.compile(r"^# +(.+?)\s*$", re.MULTILINE)
+_H1 = re.compile(r"^ {0,3}# +(.+?)\s*$")
+_EMPHASIS = ("**", "__", "*", "_")
 
 
 @dataclass
@@ -149,6 +150,25 @@ def strip(text: str) -> str:
     return block.bom + body
 
 
+def _strip_emphasis(text: str) -> str:
+    """Remove emphasis markers wrapping the whole text (`**x**`, `__x__`, `*x*`, `_x_`)."""
+    text = text.strip()
+    changed = True
+    while changed:
+        changed = False
+        for marker in _EMPHASIS:
+            inner = text[len(marker) : -len(marker)]
+            if len(text) >= 2 * len(marker) and text.startswith(marker) and text.endswith(marker):
+                if marker not in inner:
+                    text, changed = inner.strip(), True
+                    break
+    return text
+
+
 def first_h1(body: str) -> str | None:
-    m = _H1.search(body)
-    return m.group(1) if m else None
+    """Title from a `# H1` that is the body's first non-blank line, without wrapping emphasis."""
+    first = next((line for line in body.splitlines() if line.strip()), None)
+    m = _H1.match(first) if first is not None else None
+    if m is None:
+        return None
+    return _strip_emphasis(m.group(1)) or None

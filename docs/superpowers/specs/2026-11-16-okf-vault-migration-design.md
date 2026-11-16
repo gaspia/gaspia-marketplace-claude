@@ -113,7 +113,7 @@ Existing `type` values (designer's call): a note that already has any non-empty 
 
 ### Frontmatter changes
 
-- No frontmatter: add a block with `type`, `title` (first `# H1` if present, else the filename without `.md`), and `timestamp`.
+- No frontmatter: add a block with `type`, `title` (the first non-blank line of the body, if it is a `# H1`, without wrapping `**`/`__`/`*`/`_` emphasis; else the filename without `.md`), and `timestamp`.
 - Existing frontmatter: preserve every key, value, order, and comment. Add only the missing `type`, `title`, `timestamp`. Never remove keys. A capitalized `Type` key is left as is, and lowercase `type` is added.
 - `timestamp`: the date of the last git commit touching the file, ISO 8601 with offset. Fallback to file mtime for untracked files. Existing values are kept.
 - Frontmatter that fails to parse: listed in the plan as blocking. Apply refuses until it is fixed. Claude may propose a fix; the user approves it.
