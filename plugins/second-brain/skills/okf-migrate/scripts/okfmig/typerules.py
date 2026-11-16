@@ -6,6 +6,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from okfmig.frontmatter import is_empty_value
 
@@ -68,7 +69,10 @@ def _parse_rule(raw: Any, n: int) -> Rule:
 def load(path: Path) -> TypeConfig:
     if not path.exists():
         return TypeConfig()
-    raw = YAML(typ="safe").load(path.read_text(encoding="utf-8")) or {}
+    try:
+        raw = YAML(typ="safe").load(path.read_text(encoding="utf-8")) or {}
+    except YAMLError as exc:
+        raise ValueError(f"{path}: invalid YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: expected a mapping at top level")
     cfg = TypeConfig()

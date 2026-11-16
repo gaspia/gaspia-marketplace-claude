@@ -388,3 +388,10 @@ def test_dot_vault_path_titles_root_index_with_dir_name(
     assert code == 0, out
     root_index = next(op for op in plan_json(root)["ops"] if op["path"] == "index.md")
     assert f"\n# {root.name}\n" in root_index["new_content"]
+
+
+def test_types_yaml_syntax_error_exits_2(vault: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (vault / ".okf/types.yaml").write_text("rules:\n  - folder: [unclosed\n", encoding="utf-8")
+    code, out = run(capsys, "plan", str(vault))
+    assert code == 2
+    assert "invalid type rules" in out and "types.yaml" in out
