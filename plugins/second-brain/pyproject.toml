@@ -18,3 +18,9 @@ target-version = ["py314"]
 [tool.ruff]
 line-length = 120
 target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "RUF", "PL"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR2004"]
