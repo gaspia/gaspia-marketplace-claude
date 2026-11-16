@@ -171,6 +171,7 @@ def render_plan_md(plan: Plan) -> str:
         f"- Unclassified notes: {len(plan.unclassified)}",
         f"- Ambiguous links: {len(plan.ambiguous)}",
         f"- Unresolved links: {len(plan.unresolved)}",
+        f"- Stale generated indexes: {len(plan.stale_indexes)}",
     ]
     by_type: dict[str, list[str]] = {}
     for path, info in sorted(plan.types_assigned.items()):
@@ -201,6 +202,7 @@ def render_plan_md(plan: Plan) -> str:
         "Non-kebab existing types (informational)", [f"- {i['file']}: {i['type']}" for i in plan.nonkebab_types]
     )
     lines += _section("Indexes", [f"- {op.action} {op.path}" for op in index_ops])
+    lines += _section("Stale generated indexes (delete by hand)", [f"- {p}" for p in plan.stale_indexes])
     lines += _section("Excluded (outside bundle)", [f"- {p}" for p in plan.excluded])
     lines += _section("Files changed", files)
     return "\n".join(lines).rstrip("\n") + "\n"

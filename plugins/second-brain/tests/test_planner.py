@@ -258,3 +258,45 @@ def test_inventory_summary_mentions_counts(make_vault: Callable, needle: str) ->
     summary = render_inventory_summary(inv)
     assert needle in summary
     assert "—" not in summary
+
+
+def test_case_variant_index_note_blocks_create(make_vault: Callable) -> None:
+    files = {"a.md": "A\n", "Work/Index.md": "Work prose\n"}
+    root = make_vault(files)
+    plan = _plan(root, TypeConfig(default="note"), files)
+    assert "Work/index.md: conflicts with existing Work/Index.md (case-insensitive)" in plan.blocking
+    assert not [op for op in plan.ops if op.path == "Work/index.md"]
+    assert "Work/Index.md" in _ops(plan)
+
+
+def test_case_variant_root_log_blocks_create(make_vault: Callable) -> None:
+    files = {"a.md": "A\n", "Log.md": "Some prose\n"}
+    root = make_vault(files)
+    plan = _plan(root, TypeConfig(default="note"), files)
+    assert "log.md: conflicts with existing Log.md (case-insensitive)" in plan.blocking
+    assert not [op for op in plan.ops if op.path == "log.md"]
+
+
+def test_noteless_folder_index_is_stale_not_touched(make_vault: Callable) -> None:
+    root = make_vault(RAW)
+    cfg = TypeConfig(default="note")
+    _apply(root, _plan(root, cfg, RAW))
+    (root / "Work" / "c.md").unlink()
+    plan = _plan(root, cfg, RAW)
+    assert "Work/index.md" not in {op.path for op in plan.ops}
+    assert plan.stale_indexes == ["Work/index.md"]
+    assert "Work/index.md" in render_plan_md(plan)
+    assert "## Stale generated indexes (delete by hand)" in render_plan_md(plan)
+    root_index = _ops(plan)["index.md"].new_content
+    assert "Work/index.md" not in root_index
+    assert "# Subfolders" not in root_index
+
+
+def test_curated_index_in_attachments_only_folder_untouched(make_vault: Callable) -> None:
+    files = {"a.md": "A\n", "A/B/index.md": "---\nx: 1\n---\n- [[pic.png]]\n", "A/B/pic.png": "png"}
+    root = make_vault(files)
+    plan = _plan(root, TypeConfig(default="note"), files)
+    paths = {op.path for op in plan.ops}
+    assert not {"A/B/index.md", "A/index.md"} & paths
+    assert plan.stale_indexes == []
+    assert "# Subfolders" not in _ops(plan)["index.md"].new_content

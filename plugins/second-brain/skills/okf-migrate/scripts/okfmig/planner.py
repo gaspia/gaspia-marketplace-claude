@@ -51,6 +51,7 @@ class Plan:
     frontmatter_wikilinks: list[dict] = field(default_factory=list)
     nonkebab_types: list[dict] = field(default_factory=list)
     renames: dict[str, str] = field(default_factory=dict)
+    stale_indexes: list[str] = field(default_factory=list)
     excluded: list[str] = field(default_factory=list)
     types_assigned: dict[str, dict] = field(default_factory=dict)
     counts: dict[str, int] = field(default_factory=dict)
@@ -101,6 +102,9 @@ class _Planner:
         self.logs: list[Note] = []
         self.occupied: set[PurePosixPath] = set()  # reserved paths left in place that are not index/log
         self.resolver: Resolver | None = None
+        self.on_disk: dict[str, list[PurePosixPath]] = {}  # lowercased path -> every file walked (incl. excluded)
+        for f in vault.files:
+            self.on_disk.setdefault(str(f).lower(), []).append(f)
 
     # -- steps ---------------------------------------------------------------
 
@@ -194,9 +198,12 @@ class _Planner:
         self._emit(note.path, note.path, note.text, new)
 
     def _indexes(self) -> None:
-        dirs: set[PurePosixPath] = set(self.indexes)
+        dirs: set[PurePosixPath] = set()
         for path in self.infos:
             dirs.update(path.parents)
+        for d, existing in sorted(self.indexes.items()):
+            if d not in dirs and rsv.is_generated(existing.text):
+                self.plan.stale_indexes.append(str(existing.path))
         children: dict[PurePosixPath, list[PurePosixPath]] = {}
         for d in dirs:
             if d != ROOT:
@@ -282,6 +289,10 @@ class _Planner:
 
     def _emit(self, old_path: PurePosixPath, new_path: PurePosixPath, old: str | None, new: str) -> bool:
         if old is None:
+            clash = [p for p in self.on_disk.get(str(new_path).lower(), []) if p not in self.renames]
+            if clash:
+                self.plan.blocking.append(f"{new_path}: conflicts with existing {clash[0]} (case-insensitive)")
+                return False
             self.ops.append(FileOp(str(new_path), "create", None, new))
             return True
         if old_path != new_path:
