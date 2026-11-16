@@ -1,6 +1,11 @@
+import re
+from collections import Counter
 from datetime import date
 
+import pytest
+from okfmig.frontmatter import strip
 from okfmig.reserved import (
+    DATED_ITEM_RE,
     GENERATED_MARKER,
     Entry,
     add_log_entry,
@@ -173,3 +178,32 @@ def test_regroup_multi_paragraph_item_stays_with_parent() -> None:
         "## Undated\n\nprose\n"
     )
     assert regroup_log(out) == out
+
+
+PROPERTY_LOGS = [
+    REAL_LOG,
+    "# Log\n\n- 2026-11-01: first\n  child of first\n    grandchild\n* 2026-11-05 second\n- undated item\n",
+    "# Log\n\n- 2026-11-01: a\n\n  more para of a\n\n  and more\n- 2026-11-02: b\n\nprose\n",
+    "Intro prose without title.\n\n- 2026-10-01 x\n\nMore prose.\n\n- plain\n  - nested plain\n",
+    "# Log\n\n## 2026-11-05\n\n* a\n\n## Ideas\n\nsome idea\n\n### Sub\n\n* x\n- 2026-11-07: late\n",
+    "# Log\n\n## Undated\n\nold prose\n\n- 2026-11-03: dated\n\n## 2026-11-03\n\n* existing\n\n## Undated\n\ntail\n",
+    "---\ntype: log\n---\n# Log\r\n\r\n- 2026-11-01: crlf\r\n  child\r\n\r\ntext\r\n",
+    "# Log\n\n- 2026-11-01: same\n- 2026-11-01: same\n\n# Second Title\n\n- 2026-11-02: under second\n",
+]
+
+_HEADING = re.compile(r"^#{1,6}[ \t]")
+
+
+def _content_lines(text: str, normalize: bool) -> Counter[str]:
+    lines: Counter[str] = Counter()
+    for line in text.splitlines():
+        if not line.strip() or _HEADING.match(line):
+            continue
+        item = DATED_ITEM_RE.match(line) if normalize else None
+        lines[f"* {item.group(2)}" if item else line] += 1
+    return lines
+
+
+@pytest.mark.parametrize("text", PROPERTY_LOGS)
+def test_regroup_preserves_every_non_heading_line(text: str) -> None:
+    assert _content_lines(regroup_log(text), normalize=False) == _content_lines(strip(text), normalize=True)
