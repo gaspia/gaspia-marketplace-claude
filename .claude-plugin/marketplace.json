@@ -1,0 +1,17 @@
+{
+  "name": "gaspia-marketplace",
+  "owner": {
+    "name": "gaspia"
+  },
+  "metadata": {
+    "description": "Gaspia's personal Claude Code plugin marketplace"
+  },
+  "plugins": [
+    {
+      "name": "second-brain",
+      "source": "./plugins/second-brain",
+      "description": "Manage an Obsidian second brain in the Open Knowledge Format (OKF)",
+      "version": "0.1.0"
+    }
+  ]
+}

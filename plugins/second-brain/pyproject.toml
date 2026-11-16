@@ -1,0 +1,26 @@
+[project]
+name = "second-brain"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = ["ruamel.yaml>=0.18"]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff", "black"]
+
+[tool.pytest.ini_options]
+pythonpath = ["skills/okf-migrate/scripts"]
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 120
+target-version = ["py314"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "RUF", "PL"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR2004"]
