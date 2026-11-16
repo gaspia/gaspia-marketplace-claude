@@ -71,6 +71,8 @@ def load(path: Path) -> TypeConfig:
         return TypeConfig()
     try:
         raw = YAML(typ="safe").load(path.read_text(encoding="utf-8")) or {}
+    except OSError as exc:
+        raise ValueError(f"{path}: cannot read: {exc}") from exc
     except YAMLError as exc:
         raise ValueError(f"{path}: invalid YAML: {exc}") from exc
     if not isinstance(raw, dict):

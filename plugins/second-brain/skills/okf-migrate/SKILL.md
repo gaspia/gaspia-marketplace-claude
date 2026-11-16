@@ -18,14 +18,14 @@ The base directory is shown when this skill loads. Throwaway output goes to `<va
 ## Hard rules
 
 - Never write notes before the user has approved the plan.
-- Never commit, and never delete files. The tool does neither; the user commits.
+- Never commit, and never delete notes (a reserved-name rename moves a file). The tool does neither; the user commits.
 - Never edit `.obsidian/`.
 - State the undo command before running `apply`.
 
 ## Workflow
 
 1. **Preflight.** Ask for the vault path. It must be the top of a git repo with a clean tree (`.obsidian/` changes are ignored). If not clean, stop and ask the user to commit or stash. Ask the user to pause Obsidian sync plugins (for example `github-sync`) until the hand-off.
-2. **Scan.** `scan "<vault>"` writes `inventory.json` and prints a summary: note counts, frontmatter parse errors, undecodable files, folders, tags, existing `type` and field values, link resolution, reserved files (`index.md`, `log.md`) and how each was classified, excluded paths (nested git repos, `CLAUDE.md`, `AGENTS.md`).
+2. **Scan.** `scan "<vault>"` writes `inventory.json` and prints a summary: note counts, frontmatter parse errors, undecodable files, folders, tags, existing `type` and field values, link resolution, reserved files (`index.md`, `log.md`) and how each was classified, excluded paths (nested git repos, git-ignored paths, `CLAUDE.md`, `AGENTS.md`).
 3. **Type rules.** If `.okf/types.yaml` exists (a re-run), reuse it; only new unmatched notes need classifying. Otherwise read `references/types-yaml.md` first, then draft the file from the scan summary: folder rules for clear folders (`**/concepts/**` -> `concept`, meeting folders -> `meeting`), tag and field rules where the vault already tags notes, filename regexes for naming patterns, and `default: note` only if the user accepts a catch-all. Prefer the OKF example types (`concept`, `howto`, `reference`, `decision`, `metric`) where they fit; other kebab-case names are fine. Show the draft and adjust until the user confirms.
 4. **Plan.** `plan "<vault>"` (rules default to `.okf/types.yaml`, or pass `--types <file>`) writes `plan.json` and `plan.md` and prints counts and blocking items.
 5. **Fix blocking items and classify leftovers.** `apply` refuses while any blocking item exists. Handle each, then re-run `plan`:
@@ -33,6 +33,7 @@ The base directory is shown when this skill loads. Throwaway output goes to `<va
    - **Invalid frontmatter / a key that can't be filled in place / undecodable file:** propose a fix to the note, apply it only after the user approves, and have the user commit it (the tree must be clean for `apply`).
    - **Case-insensitive create clash** (for example a note named `Index.md` where an `index.md` would be created): propose renaming the note; the user decides.
    - **Reserved-name file:** the scan flags `index.md` / `log.md` files that look like plain notes. Confirm with the user and record the decision under `reserved:` (`index`, `log`, or `note`). A `note` is renamed to `<folder>-index.md` / `<folder>-log.md` and links to it are updated. A rename collision is blocking; resolve it by hand.
+   - **Reserved kind mismatch:** a `reserved:` entry that names a kind other than the file's own (for example `log` for an `index.md`). Fix the entry: use the file's own kind or `note`.
 6. **Review.** Summarize `plan.md` for the user, using this checklist:
    - Blocking: must be zero.
    - Renames: every reserved-name file that will be renamed.
@@ -42,7 +43,7 @@ The base directory is shown when this skill loads. Throwaway output goes to `<va
    - Dates unlinked: `[[2026-11-09]]` and `[[2026-11-09|...]]` become plain text.
    - Also mention: stale generated indexes (delete by hand), broken links already present, frontmatter wikilinks (left unchanged), non-kebab existing types (informational).
    Get explicit approval before step 7.
-7. **Apply.** First tell the user how to undo before committing: `git restore . && git clean -fd`, excluding `.obsidian/` (and `.okf/`, so an uncommitted `types.yaml` survives), which in full is `git -C "<vault>" restore -- . ':!.obsidian' ':!.okf' && git -C "<vault>" clean -fd -- . ':!.obsidian' ':!.okf'`. Then `apply "<vault>"`. It refuses if a planned file changed since `plan`, or if blocking items exist; re-run `plan` in that case.
+7. **Apply.** First tell the user how to undo: before committing, and before creating or editing any notes (`git clean` would delete new untracked notes too), run `git restore . && git clean -fd`, excluding `.obsidian/` (and `.okf/`, so an uncommitted `types.yaml` survives). Preview what `git clean` would delete first. In full: `git -C "<vault>" restore -- . ':!.obsidian' ':!.okf'`, then `git -C "<vault>" clean -nd -- . ':!.obsidian' ':!.okf'` (preview), then `git -C "<vault>" clean -fd -- . ':!.obsidian' ':!.okf'`. Then `apply "<vault>"`. It refuses if a planned file changed since `plan`, or if blocking items exist; re-run `plan` in that case.
 8. **Validate.** `validate "<vault>" --plan "<vault>/.okf-migrate/plan.json"`. Exit 0 means conformant and every converted link resolves (or was already unresolved in the plan). On errors, report them; do not patch around them silently.
 9. **Hand-off.** Show `git -C "<vault>" diff --stat`. Suggest a commit message (for example `chore: migrate vault to OKF`) and include `.okf/types.yaml` if it is new. Remind the user to:
    - set Obsidian "Files and links" -> "New link format" to "Relative path to file",
@@ -55,7 +56,7 @@ Same flow. `types.yaml` is reused, so usually only new unmatched notes need clas
 
 ## Exit codes
 
-`scan`, `plan`: 0 ok, 2 usage error (not a repo, dirty tree for `scan`, bad `types.yaml`). `apply`: 1 refused (blocking or stale), 2 usage error. `validate`: 1 when errors exist.
+All commands: 2 when the vault directory is missing. `scan`, `plan`: 0 ok, 2 usage error (not a repo, dirty tree for `scan`, invalid or unreadable `types.yaml`). `apply`: 0 ok, 1 refused (blocking or stale), 2 usage error (not a repo, dirty tree, invalid or unreadable `plan.json`). `validate`: 0 conformant, 1 when errors exist, 2 for invalid `types.yaml` or an invalid or unreadable `--plan` file.
 
 ## Common mistakes
 

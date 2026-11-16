@@ -75,3 +75,10 @@ def test_load_yaml_syntax_error_is_value_error_with_path(tmp_path: Path) -> None
     path.write_text("rules:\n  - folder: [unclosed\n", encoding="utf-8")
     with pytest.raises(ValueError, match=r"types\.yaml"):
         load(path)
+
+
+def test_load_unreadable_file_is_value_error(tmp_path: Path) -> None:
+    path = tmp_path / "types.yaml"
+    path.mkdir()
+    with pytest.raises(ValueError, match=r"types\.yaml"):
+        load(path)
