@@ -78,7 +78,7 @@ Paulo chose approach 2.
 5. **Classify leftovers.** Claude reads each unclassified note and proposes a type with a one-line reason, written as overrides in `types.yaml`. The user reviews. Re-run `plan`.
 6. **Review.** Claude summarizes `plan.md` (counts, risky items: ambiguous links, renames, parse errors). The user approves. Nothing is written to notes before this.
 7. **Apply.** `okf_migrate.py apply <vault> --plan plan.json`. Refuses if any planned file changed since `plan` (content hash check).
-8. **Validate.** `okf_migrate.py validate <vault>` checks OKF conformance and that every converted link resolves to an existing file (or was already unresolved before). Non-zero exit on failure.
+8. **Validate.** `okf_migrate.py validate <vault>` checks OKF conformance and that every converted link resolves to an existing file (or was already unresolved before). A local link that climbs out of the vault root is an error. Non-zero exit on failure.
 9. **Hand-off.** Show `git diff --stat`. The skill does not commit; it suggests a commit message. Tell the user to set Obsidian's "New link format" to "Relative path to file" and keep "Use [[Wikilinks]]" off, so new links stay OKF-compatible.
 
 Workdir: `<vault>/.okf-migrate/`, added to `.git/info/exclude` (local, never committed) so the vault's `.gitignore` is not touched. It holds throwaway files (`inventory.json`, `plan.json`, `plan.md`).
@@ -87,7 +87,7 @@ Persistent config: `<vault>/.okf/types.yaml`, committed with the vault, so type 
 
 ### Scope and exclusions
 
-Always excluded: `.obsidian/`, `.git/`, `.trash/`, the workdir, any directory containing its own `.git` (nested repos). Default excluded files: `CLAUDE.md`, `AGENTS.md` (tool instructions, not knowledge; designer's call). The user can add glob excludes in `types.yaml`. Excluded paths are listed in the plan and in validate output as "outside bundle".
+Always excluded: `.obsidian/`, `.git/`, `.trash/`, the workdir, any directory containing its own `.git` (nested repos), and untracked paths that git ignores (`git restore` could not undo changes there; they still count for link resolution). Default excluded files: `CLAUDE.md`, `AGENTS.md` (tool instructions, not knowledge; designer's call). The user can add glob excludes in `types.yaml`. Excluded paths are listed in the plan and in validate output as "outside bundle".
 
 ### Type rules file (`types.yaml`)
 
@@ -134,7 +134,7 @@ Applies to note bodies only. Skips fenced code blocks, inline code, and frontmat
 | `![[img.png\|300]]` | `![img.png\|300](rel/path/img.png)` |
 | `![[Note]]` | `![Note](rel/path/Note.md)` |
 
-- Resolution follows Obsidian: a target containing `/` is a vault path. Otherwise match by filename (with or without extension). With several matches, prefer the one Obsidian would pick (shortest path, then closest folder); report it as ambiguous in the plan.
+- Resolution follows Obsidian: a target starting with `./` or `../` is relative to the linking note's folder and is normalized to a vault path. Any other target containing `/` is a vault path. Otherwise match by filename (with or without extension). With several matches, prefer the one Obsidian would pick (shortest path, then closest folder); report it as ambiguous in the plan.
 - **Date wikilinks** (Paulo's decision): a wikilink whose target is an ISO date (`YYYY-MM-DD`, optionally followed by a time) and that does not resolve to an existing note is a date, not a link. It becomes plain text: the alias if there is one, else the target. `[[2026-11-09]]` becomes `2026-11-09`, and `[[2026-11-09|2026-11-09 16:04]]` becomes `2026-11-09 16:04`. Embeds (`![[2026-11-09]]`) are not affected. If a note with that name exists (for example a real daily note), it is converted as a normal link, so no working link is lost. The plan lists these under "dates unlinked".
 - Other unresolved targets become links to the path Obsidian would create the note at (vault root unless `.obsidian/app.json` sets `newFileFolderPath`). OKF allows broken links, and they are listed in the plan.
 - Paths are relative to the linking note, encoded the way Obsidian writes markdown links (spaces as `%20`; also encode `(`, `)`, `#`, `%`, `^` in the path part). Heading anchors use Obsidian's form (`%20` for spaces), not GitHub slugs.
@@ -164,7 +164,7 @@ The same `scan` / `plan` / `apply` / `validate` flow runs on a vault that was mi
 
 - `scan` + `plan` on an already-migrated vault with no new notes produce an empty plan. Tested. A run after adding notes touches only those notes, indexes whose content changes, and the root log. Tested.
 - `apply` writes files atomically (temp file + rename) and only files in the plan.
-- Undo is `git restore . && git clean -fd` (excluding `.obsidian/`). The skill states this before apply.
+- Undo is `git restore . && git clean -fd` (excluding `.obsidian/`), run before creating or editing any notes, after previewing with `git clean -nd`. The skill states this before apply.
 
 ### Testing
 
