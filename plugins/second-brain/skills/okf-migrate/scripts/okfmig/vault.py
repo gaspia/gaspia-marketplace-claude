@@ -41,8 +41,9 @@ def _read_settings(root: Path) -> ObsidianSettings:
         return default
     if isinstance(data, dict) and data.get("newFileLocation") == "folder":
         folder = data.get("newFileFolderPath")
-        if isinstance(folder, str) and folder:
-            return ObsidianSettings(PurePosixPath(folder))
+        if isinstance(folder, str):
+            # Obsidian accepts "/", "/Inbox", "Inbox/" and Windows separators; all are vault-relative
+            return ObsidianSettings(PurePosixPath(folder.replace("\\", "/").strip("/") or "."))
     return default
 
 

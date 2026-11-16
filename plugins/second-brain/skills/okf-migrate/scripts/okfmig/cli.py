@@ -183,6 +183,7 @@ HANDLERS = {"scan": _scan, "plan": _plan, "apply": _apply, "validate": _validate
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    args.vault = args.vault.resolve()  # `.` would otherwise give an empty root index title
     if not args.vault.is_dir():
         print(f"error: vault is not a directory: {args.vault}", file=sys.stderr)
         return 2

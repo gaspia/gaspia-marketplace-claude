@@ -375,3 +375,16 @@ def test_git_ignored_notes_are_left_alone(make_vault: Callable, capsys: pytest.C
     code, out = run(capsys, "validate", v)
     assert code == 0, out
     assert "outside bundle: private" in out
+
+
+def test_dot_vault_path_titles_root_index_with_dir_name(
+    make_vault: Callable, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = make_vault({"a.md": "A\n", ".okf/types.yaml": "default: note\n"})
+    init_repo(root)
+    commit_all(root, "initial")
+    monkeypatch.chdir(root)
+    code, out = run(capsys, "plan", ".", "--today", TODAY)
+    assert code == 0, out
+    root_index = next(op for op in plan_json(root)["ops"] if op["path"] == "index.md")
+    assert f"\n# {root.name}\n" in root_index["new_content"]

@@ -332,3 +332,11 @@ def test_title_from_leading_h1_else_stem(make_vault: Callable, body: str, title:
     plan = _plan(root, TypeConfig(default="note"), {"Note.md": body})
     op = next(o for o in plan.ops if o.path == "Note.md")
     assert f"title: {title}\n" in op.new_content or f"title: '{title}'\n" in op.new_content
+
+
+def test_unresolved_link_with_root_new_file_folder(make_vault: Callable) -> None:
+    app = '{"newFileLocation": "folder", "newFileFolderPath": "/"}'
+    root = make_vault({".obsidian/app.json": app, "Work/x.md": "See [[Missing]].\n"})
+    plan = _plan(root, TypeConfig(default="note"), {"Work/x.md": ""})
+    op = next(o for o in plan.ops if o.path == "Work/x.md")
+    assert "See [Missing](../Missing.md).\n" in op.new_content

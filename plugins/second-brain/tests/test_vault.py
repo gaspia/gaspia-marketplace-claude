@@ -2,6 +2,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
+import pytest
 from okfmig.mdtext import code_ranges, in_ranges, inline_tags
 from okfmig.vault import discover
 
@@ -86,3 +87,12 @@ def test_ignored_paths_are_excluded_but_still_files(make_vault: MakeVault) -> No
     assert vault.excluded == p("private", "scratch.md")
     assert PurePosixPath("private/secret.md") in vault.files
     assert PurePosixPath("scratch.md") in vault.files
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("/", "."), ("/Inbox", "Inbox"), ("Inbox/", "Inbox"), ("Inbox\\Sub", "Inbox/Sub"), ("/Inbox/Sub/", "Inbox/Sub")],
+)
+def test_new_file_folder_is_normalized(make_vault: MakeVault, raw: str, expected: str) -> None:
+    app = json.dumps({"newFileLocation": "folder", "newFileFolderPath": raw})
+    assert discover(make_vault({".obsidian/app.json": app})).settings.new_file_folder == PurePosixPath(expected)
