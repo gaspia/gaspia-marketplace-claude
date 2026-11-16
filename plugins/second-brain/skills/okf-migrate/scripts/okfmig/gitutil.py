@@ -56,6 +56,14 @@ def dirty_paths(root: Path) -> list[str]:
     return paths
 
 
+def ignored_paths(root: Path) -> list[PurePosixPath]:
+    """Untracked paths git ignores; a wholly ignored directory is listed once, without its contents."""
+    out = _git(root, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
+    paths = {PurePosixPath(entry.rstrip("/")) for entry in out.split("\0") if entry}
+    # git also lists the contents of a directory that holds only ignored files; keep just the directory
+    return sorted(p for p in paths if not any(parent in paths for parent in p.parents))
+
+
 def last_commit_times(root: Path) -> dict[PurePosixPath, str]:
     """Newest commit time (ISO 8601 with offset) per tracked path."""
     out = _git(root, "log", "--format=%x00%cI", "--name-only")

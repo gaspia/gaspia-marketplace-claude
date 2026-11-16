@@ -2,7 +2,7 @@
 
 import json
 import os
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -50,8 +50,15 @@ def _is_excluded(rel: PurePosixPath, patterns: Sequence[str]) -> bool:
     return any(rel.full_match(pattern) for pattern in patterns)
 
 
-def discover(root: Path, extra_excludes: Sequence[str] = ()) -> Vault:
+def _ignored_by(rel: PurePosixPath, ignored: set[PurePosixPath]) -> PurePosixPath | None:
+    """The ignored path that covers `rel` (itself or an ignored ancestor directory), if any."""
+    return next((p for p in (rel, *rel.parents) if p in ignored), None)
+
+
+def discover(root: Path, extra_excludes: Sequence[str] = (), ignored: Iterable[PurePosixPath] = ()) -> Vault:
+    """Walk the vault. `ignored` holds git-ignored paths: kept in `files` for link resolution, never notes."""
     patterns = (*DEFAULT_EXCLUDED_FILES, *extra_excludes)
+    ignored_set = set(ignored)
     notes: list[Note] = []
     reserved: list[Note] = []
     files: list[PurePosixPath] = []
@@ -72,6 +79,11 @@ def discover(root: Path, extra_excludes: Sequence[str] = ()) -> Vault:
             rel = rel_dir / name
             files.append(rel)
             if not name.endswith(".md") or in_repo:
+                continue
+            covering = _ignored_by(rel, ignored_set)
+            if covering is not None:
+                if covering not in excluded:
+                    excluded.append(covering)
                 continue
             if _is_excluded(rel, patterns):
                 excluded.append(rel)

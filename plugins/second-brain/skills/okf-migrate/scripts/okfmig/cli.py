@@ -5,7 +5,7 @@ import json
 import subprocess
 import sys
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from okfmig import gitutil, typerules
 from okfmig.apply import BlockedPlanError, StaleFileError, apply_plan
@@ -81,6 +81,11 @@ def _require_clean(vault: Path) -> None:
         raise _Exit(2, f"error: uncommitted changes (commit or stash them first):\n{lines}")
 
 
+def _ignored(vault: Path) -> list[PurePosixPath]:
+    """Git-ignored paths: `git restore` cannot undo changes there, so they stay outside the bundle."""
+    return gitutil.ignored_paths(vault) if gitutil.is_repo(vault) else []
+
+
 def _timestamps(vault: Path) -> dict:
     try:
         return gitutil.last_commit_times(vault)
@@ -93,7 +98,7 @@ def _scan(args: argparse.Namespace) -> int:
     _require_repo(vault)
     _require_clean(vault)
     cfg = _load_types(vault / ".okf" / "types.yaml")
-    inventory = build_inventory(discover(vault, cfg.exclude), cfg)
+    inventory = build_inventory(discover(vault, cfg.exclude, _ignored(vault)), cfg)
     workdir = _workdir(args)
     workdir.mkdir(parents=True, exist_ok=True)
     out = workdir / "inventory.json"
@@ -107,7 +112,9 @@ def _plan(args: argparse.Namespace) -> int:
     vault = args.vault
     _require_repo(vault)
     cfg = _load_types(args.types if args.types is not None else vault / ".okf" / "types.yaml")
-    plan = build_plan(discover(vault, cfg.exclude), cfg, _timestamps(vault), args.today or date.today())
+    plan = build_plan(
+        discover(vault, cfg.exclude, _ignored(vault)), cfg, _timestamps(vault), args.today or date.today()
+    )
     workdir = _workdir(args)
     workdir.mkdir(parents=True, exist_ok=True)
     (workdir / "plan.json").write_text(plan_to_json(plan) + "\n", encoding="utf-8")
@@ -162,7 +169,7 @@ def _validate(args: argparse.Namespace) -> int:
     expected = None
     if args.plan is not None:
         expected = expected_unresolved_from(_read_plan(args.plan))
-    report = validate(vault, cfg, expected)
+    report = validate(vault, cfg, expected, _ignored(vault))
     for e in report.errors:
         print(f"error: {e}")
     for w in report.warnings:

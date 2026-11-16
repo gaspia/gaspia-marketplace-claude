@@ -4,6 +4,7 @@ from pathlib import Path, PurePosixPath
 from okfmig.gitutil import (
     dirty_paths,
     ensure_info_exclude,
+    ignored_paths,
     is_repo,
     last_commit_times,
     mtime_iso,
@@ -79,3 +80,14 @@ def test_mtime_iso_has_offset(tmp_path):
     f.write_text("x")
     value = mtime_iso(f)
     assert len(value) == 25 and value[19] in "+-"
+
+
+def test_ignored_paths_lists_untracked_ignored_dirs_and_files(git_vault):
+    root = git_vault({".gitignore": "private/\n*.tmp.md\n", "a.md": "x", "sub/kept.md": "k"})
+    (root / "private").mkdir()
+    (root / "private" / "secret.md").write_text("s")
+    (root / "sub" / "x.tmp.md").write_text("t")
+    (root / "only").mkdir()
+    (root / "only" / "y.tmp.md").write_text("t")
+    # a directory holding only ignored files is reported once, without its contents
+    assert ignored_paths(root) == [PurePosixPath(p) for p in ("only", "private", "sub/x.tmp.md")]

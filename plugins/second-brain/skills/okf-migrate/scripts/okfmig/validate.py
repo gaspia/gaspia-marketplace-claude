@@ -1,5 +1,6 @@
 """OKF conformance check for a migrated vault."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -50,8 +51,13 @@ def _check_reserved(note: Note, errors: list[str]) -> str:
     return parsed.body
 
 
-def validate(root: Path, cfg: TypeConfig, expected_unresolved: set[str] | None = None) -> Report:
-    vault = discover(root, cfg.exclude)
+def validate(
+    root: Path,
+    cfg: TypeConfig,
+    expected_unresolved: set[str] | None = None,
+    ignored: Iterable[PurePosixPath] = (),
+) -> Report:
+    vault = discover(root, cfg.exclude, ignored)
     report = Report()
     for path in vault.undecodable:
         report.errors.append(f"{path}: not valid UTF-8")

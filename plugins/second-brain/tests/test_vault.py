@@ -77,3 +77,12 @@ def test_note_text_roundtrips_crlf_and_bom(make_vault: MakeVault) -> None:
 
 def test_inline_code_does_not_span_blank_line() -> None:
     assert "real" in inline_tags("`unclosed\n\n#real\n\nlater `x`")
+
+
+def test_ignored_paths_are_excluded_but_still_files(make_vault: MakeVault) -> None:
+    root = make_vault({"private/secret.md": "s", "private/deep/d.md": "d", "scratch.md": "x", "n.md": "n"})
+    vault = discover(root, ignored=p("private", "scratch.md"))
+    assert [n.path for n in vault.notes] == p("n.md")
+    assert vault.excluded == p("private", "scratch.md")
+    assert PurePosixPath("private/secret.md") in vault.files
+    assert PurePosixPath("scratch.md") in vault.files

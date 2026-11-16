@@ -357,3 +357,21 @@ def test_not_a_repo_exits_2(make_vault: Callable, capsys: pytest.CaptureFixture[
     code, out = run(capsys, "scan", str(root))
     assert code == 2
     assert "git" in out
+
+
+def test_git_ignored_notes_are_left_alone(make_vault: Callable, capsys: pytest.CaptureFixture[str]) -> None:
+    root = make_vault({".gitignore": "private/\n", "a.md": "A\n", ".okf/types.yaml": "default: note\n"})
+    init_repo(root)
+    commit_all(root, "initial")
+    (root / "private").mkdir()
+    (root / "private" / "secret.md").write_text("Secret [[a]]\n", encoding="utf-8")
+    v = str(root)
+    assert run(capsys, "plan", v, "--today", TODAY)[0] == 0
+    assert "private" in plan_json(root)["excluded"]
+    code, out = run(capsys, "apply", v)
+    assert code == 0, out
+    assert read(root, "private/secret.md") == "Secret [[a]]\n"
+    assert not (root / "private" / "index.md").exists()
+    code, out = run(capsys, "validate", v)
+    assert code == 0, out
+    assert "outside bundle: private" in out
