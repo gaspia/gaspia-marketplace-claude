@@ -1,3 +1,5 @@
+import os
+import stat
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path, PurePosixPath
@@ -120,7 +122,38 @@ def test_validate_root_index_frontmatter(make_vault: Callable) -> None:
     root = _migrated(make_vault)
     text = (root / "index.md").read_text(encoding="utf-8")
     (root / "index.md").write_text(text.replace('okf_version: "0.2"\n', 'okf_version: "0.2"\ntitle: Root\n'))
-    assert any("index.md" in e for e in validate(root, CFG).errors)
+    assert _failing(validate(root, CFG).errors) == {"index.md"}
+
+
+def _failing(errors: list[str]) -> set[str]:
+    return {e.split(": ", 1)[0] for e in errors}
+
+
+def test_validate_missing_root_index(make_vault: Callable) -> None:
+    root = _migrated(make_vault)
+    (root / "index.md").unlink()
+    assert _failing(validate(root, CFG).errors) == {"index.md"}
+
+
+def test_validate_root_index_without_frontmatter(make_vault: Callable) -> None:
+    root = _migrated(make_vault)
+    text = (root / "index.md").read_text(encoding="utf-8")
+    (root / "index.md").write_text(text.replace('---\nokf_version: "0.2"\n---\n\n', ""), encoding="utf-8")
+    assert not (root / "index.md").read_text(encoding="utf-8").startswith("---")
+    assert _failing(validate(root, CFG).errors) == {"index.md"}
+
+
+@pytest.mark.parametrize("value", ['"0.1"', "0.2", "'0.20'"])
+def test_validate_root_index_wrong_version(make_vault: Callable, value: str) -> None:
+    root = _migrated(make_vault)
+    text = (root / "index.md").read_text(encoding="utf-8")
+    (root / "index.md").write_text(text.replace('okf_version: "0.2"', f"okf_version: {value}"), encoding="utf-8")
+    assert _failing(validate(root, CFG).errors) == {"index.md"}
+
+
+def test_validate_empty_vault_needs_no_root_index(make_vault: Callable) -> None:
+    root = make_vault({"CLAUDE.md": "rules\n"})
+    assert validate(root, CFG).errors == []
 
 
 def test_validate_frontmatter_wikilinks_and_code_are_allowed(make_vault: Callable) -> None:
@@ -152,3 +185,45 @@ def test_validate_ignores_external_and_anchor_links(make_vault: Callable) -> Non
         encoding="utf-8",
     )
     assert validate(root, CFG, expected_unresolved={"Gone.md"}).errors == []
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def _umask() -> int:
+    old = os.umask(0)
+    os.umask(old)
+    return old
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o755, 0o600])
+def test_apply_keeps_mode_on_modify(make_vault: Callable, mode: int) -> None:
+    root = make_vault({"a.md": "A\n"})
+    (root / "a.md").chmod(mode)
+    plan = _plan(root)
+    assert any(op.path == "a.md" and op.action == "modify" for op in plan.ops)
+    apply_plan(root, plan)
+    assert _mode(root / "a.md") == mode
+
+
+def test_apply_rename_keeps_source_mode(make_vault: Callable) -> None:
+    root = make_vault({"Work/index.md": "# Home\n\nProse.\n"})
+    (root / "Work/index.md").chmod(0o640)
+    plan = _plan(root)
+    assert plan.renames == {"Work/index.md": "Work/work-index.md"}
+    apply_plan(root, plan)
+    assert _mode(root / "Work/work-index.md") == 0o640
+
+
+def test_apply_create_uses_umask(make_vault: Callable) -> None:
+    root = make_vault({"a.md": "A\n"})
+    plan = _plan(root)
+    old = os.umask(0o027)
+    try:
+        apply_plan(root, plan)
+    finally:
+        os.umask(old)
+    assert _mode(root / "index.md") == 0o640
+    assert _mode(root / "log.md") == 0o640
+    assert _umask() == old

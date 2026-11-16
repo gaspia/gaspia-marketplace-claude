@@ -6,6 +6,7 @@ from pathlib import Path, PurePosixPath
 from okfmig.frontmatter import is_empty_value, parse
 from okfmig.links import linked_paths, wikilinks_in
 from okfmig.planner import Plan
+from okfmig.reserved import OKF_VERSION
 from okfmig.typerules import TypeConfig
 from okfmig.vault import Note, discover
 
@@ -41,13 +42,10 @@ def _check_note(note: Note, errors: list[str]) -> str | None:
 
 def _check_reserved(note: Note, errors: list[str]) -> str:
     parsed = parse(note.text)
-    if not parsed.has_block:
-        return parsed.body
     if note.path == ROOT_INDEX:
-        data = parsed.data
-        if parsed.error is not None or not isinstance(data, dict) or set(data) != {"okf_version"}:
-            errors.append(f"{note.path}: root index frontmatter must contain only okf_version")
-    else:
+        if parsed.error is not None or parsed.data != {"okf_version": OKF_VERSION}:
+            errors.append(f'{note.path}: root index frontmatter must be exactly okf_version: "{OKF_VERSION}"')
+    elif parsed.has_block:
         errors.append(f"{note.path}: {note.path.name} must not have frontmatter")
     return parsed.body
 
@@ -63,6 +61,8 @@ def validate(root: Path, cfg: TypeConfig, expected_unresolved: set[str] | None =
         if body is not None:
             bodies.append((note, body))
     bodies.extend((note, _check_reserved(note, report.errors)) for note in vault.reserved)
+    if vault.notes and all(note.path != ROOT_INDEX for note in vault.reserved):
+        report.errors.append(f"{ROOT_INDEX}: missing root index")
 
     for note, body in sorted(bodies, key=lambda item: item[0].path):
         for link in wikilinks_in(body):

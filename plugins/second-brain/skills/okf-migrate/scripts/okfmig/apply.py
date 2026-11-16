@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import stat
 import tempfile
 from pathlib import Path
 
@@ -37,12 +38,21 @@ def _stale(root: Path, plan: Plan) -> list[str]:
     return stale
 
 
-def _write_atomic(path: Path, content: str) -> None:
+def _new_file_mode() -> int:
+    umask = os.umask(0)
+    os.umask(umask)
+    return 0o666 & ~umask
+
+
+def _write_atomic(path: Path, content: str, mode_from: Path | None) -> None:
+    """Write via a temp file in the same dir; keep `mode_from`'s permissions, else honor the umask."""
+    mode = stat.S_IMODE(mode_from.stat().st_mode) if mode_from is not None else _new_file_mode()
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
             f.write(content)
+        os.chmod(tmp, mode)
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
@@ -66,9 +76,10 @@ def apply_plan(root: Path, plan: Plan) -> list[str]:
     for op in plan.ops:
         if op.action == "rename":
             assert op.new_path is not None
-            _write_atomic(root / op.new_path, op.new_content)
+            _write_atomic(root / op.new_path, op.new_content, mode_from=root / op.path)
             (root / op.path).unlink()
         else:
-            _write_atomic(root / op.path, op.new_content)
+            target = root / op.path
+            _write_atomic(target, op.new_content, mode_from=target if target.exists() else None)
         changed.append(_describe(op))
     return changed
