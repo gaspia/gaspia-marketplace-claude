@@ -12,8 +12,8 @@ from okfmig.frontmatter import parse
 from okfmig.gitutil import commit_times_under, has_changes, ignored_under, repo_location
 from okfmig.links import linked_paths, relative_href
 from okfmig.planner import build_plan
-from okfmig.reserved import add_log_entry
-from okfmig.snapshot import PREVIOUS, load_batches, load_ledger, save_batches, save_ledger
+from okfmig.reserved import add_log_entry, has_log_entry
+from okfmig.snapshot import PREVIOUS, Batch, LedgerEntry, load_batches, load_ledger, save_batches, save_ledger
 from okfmig.vault import discover
 
 SIMILAR_RATIO = 0.75
@@ -127,29 +127,47 @@ def _remove_previous(brain: Path, previous: str) -> None:
         folder = folder.parent
 
 
+def _check(brain: Path, batch: Batch, ledger: dict[str, LedgerEntry]) -> None:
+    """Refuse a batch whose summary pages are missing or untouched, or whose origins left the ledger."""
+    missing = [item.summary_page for item in batch.items if not (brain / item.summary_page).is_file()]
+    if missing:
+        raise BatchError(f"batch {batch.id}: missing summary pages: {', '.join(missing)}")
+    if repo_location(brain) is not None:  # snapshot needs a clean brain: an untouched summary was not processed
+        stale = [item.summary_page for item in batch.items if not has_changes(brain, item.summary_page)]
+        if stale:
+            raise BatchError(
+                f"batch {batch.id}: summary pages not updated since the snapshot (process each source and record "
+                f"what changed in its summary): {', '.join(stale)}"
+            )
+    unknown = [item.origin for item in batch.items if item.origin not in ledger]
+    if unknown:
+        raise BatchError(f"batch {batch.id}: origins missing from the ledger: {', '.join(unknown)}")
+
+
+def _append_log(brain: Path, today: date, lines: list[str]) -> None:
+    """Append the lines under today's heading, skipping any already there (a re-run after a crash)."""
+    log = brain / LOG
+    old = log.read_bytes().decode("utf-8") if log.exists() else None
+    text = old
+    for line in lines:
+        if not has_log_entry(text, today, line):
+            text = add_log_entry(text, today, line)
+    if text is not None and text != old:
+        log.write_bytes(text.encode("utf-8"))
+
+
 def complete_batch(brain: Path, batch_id: str, today: date) -> list[str]:
     """Mark a batch ingested: normalize pages and indexes, update the ledger, log one line per source.
 
-    Every check runs before the first write, so a refused batch leaves the brain untouched.
+    Every check runs before the first write, so a refused batch leaves the brain untouched. Each write is
+    idempotent and the batch is dequeued last, so a re-run after a crash completes it without duplicate log lines.
     """
     batches = load_batches(brain)
     batch = next((b for b in batches if b.id == batch_id), None)
     if batch is None:
         raise BatchError(f"unknown or already completed batch {batch_id!r}")
-    missing = [item.summary_page for item in batch.items if not (brain / item.summary_page).is_file()]
-    if missing:
-        raise BatchError(f"batch {batch_id}: missing summary pages: {', '.join(missing)}")
-    if repo_location(brain) is not None:  # snapshot needs a clean brain: an untouched summary was not processed
-        stale = [item.summary_page for item in batch.items if not has_changes(brain, item.summary_page)]
-        if stale:
-            raise BatchError(
-                f"batch {batch_id}: summary pages not updated since the snapshot (process each source and record "
-                f"what changed in its summary): {', '.join(stale)}"
-            )
     ledger = load_ledger(brain)
-    unknown = [item.origin for item in batch.items if item.origin not in ledger]
-    if unknown:
-        raise BatchError(f"batch {batch_id}: origins missing from the ledger: {', '.join(unknown)}")
+    _check(brain, batch, ledger)
 
     cfg = typerules.load(brain / ".okf" / "types.yaml")
     vault = discover(brain, cfg.exclude, ignored_under(brain))
@@ -167,14 +185,7 @@ def complete_batch(brain: Path, batch_id: str, today: date) -> list[str]:
         entry = ledger[item.origin]
         entry.ingested_sha256 = entry.origin_sha256
     save_ledger(brain, ledger)
-
-    log = brain / LOG
-    text = log.read_bytes().decode("utf-8") if log.exists() else None
-    for line in lines:
-        text = add_log_entry(text, today, line)
-    assert text is not None
-    log.write_bytes(text.encode("utf-8"))
-
+    _append_log(brain, today, lines)
     save_batches(brain, [b for b in batches if b.id != batch_id])
     for item in batch.items:
         if item.previous is not None:

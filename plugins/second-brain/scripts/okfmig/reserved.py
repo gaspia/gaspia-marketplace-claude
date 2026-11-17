@@ -229,6 +229,26 @@ def _collapse_blank(lines: list[str]) -> list[str]:
     return out
 
 
+def has_log_entry(text: str | None, today: date, line: str) -> bool:
+    """True when `line` is already an entry under today's date heading."""
+    if text is None:
+        return False
+    lines = _split_lines(text)
+    stamp = today.isoformat()
+    start = next(
+        (i for i, ln in enumerate(lines) if (m := _DATE_HEADING_RE.match(_content(ln))) and m.group(1) == stamp), None
+    )
+    if start is None:
+        return False
+    for ln in lines[start + 1 :]:
+        content = _content(ln)
+        if _ANY_HEADING_RE.match(content):
+            return False
+        if content.rstrip() == line:
+            return True
+    return False
+
+
 def add_log_entry(text: str | None, today: date, line: str) -> str:
     stamp = today.isoformat()
     if text is None:
