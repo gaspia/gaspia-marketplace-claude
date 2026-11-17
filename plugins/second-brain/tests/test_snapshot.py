@@ -4,6 +4,7 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path, PurePosixPath
 
+import pytest
 from okfmig.brain import BrainSettings, init_brain
 from okfmig.gitutil import ignored_under
 from okfmig.links import embed_targets
@@ -74,8 +75,8 @@ def test_unchanged_skipped_and_changed_keeps_previous(tmp_path: Path, make_vault
 
     # batch b001 done: ledger marked ingested, batches cleared
     ledger = load_ledger(brain)
-    entry = ledger["vault:a.md"]
-    entry.ingested_sha256 = entry.origin_sha256
+    for entry in ledger.values():
+        entry.ingested_sha256 = entry.origin_sha256
     save_ledger(brain, ledger)
     (brain / ".okf-ingest/batches.json").write_text("[]", encoding="utf-8")
 
@@ -236,7 +237,8 @@ def test_batches_continue_ids_without_duplicates(tmp_path: Path, make_vault: Cal
 
     result = take_snapshot(brain, vault, None, BATCH, TODAY)
 
-    assert result.changed == ["vault:a.md"] and result.new == ["vault:b.md"]
+    assert result.unchanged == ["vault:a.md"] and result.new == ["vault:b.md"] and result.changed == []
+    assert (brain / "raw/vault/a.md").read_bytes() == b"a2\n"
     batches = load_batches(brain)
     assert [b.id for b in batches] == ["b001", "b002"]
     assert [i.origin for i in batches[1].items] == ["vault:b.md"]
@@ -293,3 +295,154 @@ def test_ignored_under_strips_prefix(tmp_path: Path) -> None:
 def test_embed_targets() -> None:
     text = "![[img.png|100]] [[note]] ![[doc#sec]] ![a](x%20y.png) [b](z.png) `![[c.png]]` ![w](http://h/x.png)\n"
     assert embed_targets(text) == [("wiki", "img.png"), ("wiki", "doc"), ("md", "x y.png")]
+
+
+def _lose_batches(brain: Path) -> None:
+    (brain / ".okf-ingest/batches.json").unlink()
+
+
+def _mark_ingested(brain: Path, origin: str) -> None:
+    ledger = load_ledger(brain)
+    ledger[origin].ingested_sha256 = ledger[origin].origin_sha256
+    save_ledger(brain, ledger)
+
+
+def test_lost_batches_requeue_uningested(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    vault = make_vault({**OBSIDIAN, "a.md": "a\n"})
+    brain = _brain(tmp_path)
+    take_snapshot(brain, vault, None, BATCH, TODAY)
+    _lose_batches(brain)
+
+    result = take_snapshot(brain, vault, None, BATCH, TODAY)
+
+    assert result.new == ["vault:a.md"] and result.unchanged == []
+    [batch] = load_batches(brain)
+    [item] = batch.items
+    assert item.status == "new" and item.previous is None
+
+
+def test_edit_before_ingest_stays_new(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    vault = make_vault({**OBSIDIAN, "a.md": "a\n"})
+    brain = _brain(tmp_path)
+    take_snapshot(brain, vault, None, BATCH, TODAY)
+    _lose_batches(brain)
+    (vault / "a.md").write_text("a2\n", encoding="utf-8")
+
+    result = take_snapshot(brain, vault, None, BATCH, TODAY)
+
+    assert result.new == ["vault:a.md"] and result.changed == []
+    [item] = load_batches(brain)[0].items
+    assert item.status == "new" and item.previous is None
+    assert not (brain / ".okf-ingest/previous").exists()
+    assert (brain / "raw/vault/a.md").read_bytes() == b"a2\n"
+
+
+def test_previous_is_ingested_version_across_lost_batches(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    vault = make_vault({**OBSIDIAN, "a.md": "v1\n"})
+    brain = _brain(tmp_path)
+    take_snapshot(brain, vault, None, BATCH, TODAY)
+    _mark_ingested(brain, "vault:a.md")
+    _lose_batches(brain)
+
+    (vault / "a.md").write_text("v2\n", encoding="utf-8")
+    take_snapshot(brain, vault, None, BATCH, TODAY)
+    _lose_batches(brain)
+    (vault / "a.md").write_text("v3\n", encoding="utf-8")
+    result = take_snapshot(brain, vault, None, BATCH, TODAY)
+
+    assert result.changed == ["vault:a.md"]
+    [item] = load_batches(brain)[0].items
+    assert item.status == "changed" and item.previous == ".okf-ingest/previous/raw/vault/a.md"
+    assert (brain / item.previous).read_bytes() == b"v1\n"
+    assert (brain / "raw/vault/a.md").read_bytes() == b"v3\n"
+
+
+def test_stale_previous_replaced_or_dropped(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    vault = make_vault({**OBSIDIAN, "a.md": "v1\n", "b.md": "b1\n"})
+    brain = _brain(tmp_path)
+    take_snapshot(brain, vault, None, BATCH, TODAY)
+    _mark_ingested(brain, "vault:a.md")
+    _mark_ingested(brain, "vault:b.md")
+    _lose_batches(brain)
+    stale = brain / ".okf-ingest/previous/raw/vault"
+    stale.mkdir(parents=True)
+    (stale / "a.md").write_text("stale\n", encoding="utf-8")
+    (stale / "b.md").write_text("stale\n", encoding="utf-8")
+    (brain / "raw/vault/b.md").write_text("tampered\n", encoding="utf-8")  # ingested version unavailable
+    (vault / "a.md").write_text("v2\n", encoding="utf-8")
+    (vault / "b.md").write_text("b2\n", encoding="utf-8")
+
+    take_snapshot(brain, vault, None, BATCH, TODAY)
+
+    items = {i.origin: i for i in load_batches(brain)[0].items}
+    assert (brain / items["vault:a.md"].previous).read_bytes() == b"v1\n"
+    assert items["vault:b.md"].status == "changed" and items["vault:b.md"].previous is None
+
+
+def test_ingested_source_unchanged(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    vault = make_vault({**OBSIDIAN, "a.md": "a\n"})
+    brain = _brain(tmp_path)
+    take_snapshot(brain, vault, None, BATCH, TODAY)
+    _mark_ingested(brain, "vault:a.md")
+    _lose_batches(brain)
+
+    result = take_snapshot(brain, vault, None, BATCH, TODAY)
+
+    assert result.unchanged == ["vault:a.md"] and load_batches(brain) == []
+
+
+def test_ignored_attachments_not_copied(tmp_path: Path, git_vault: Callable[[Files], Path]) -> None:
+    vault = git_vault(
+        {
+            **OBSIDIAN,
+            ".gitignore": "secret/\n",
+            "a.md": "![[key.png]] ![k](secret/other.png) ![[ok.png]]\n",
+            "secret/key.png": b"k",
+            "secret/other.png": b"o",
+            "ok.png": b"ok",
+        }
+    )
+    brain = _brain(tmp_path)
+
+    result = take_snapshot(brain, vault, None, BATCH, TODAY)
+
+    assert result.attachments == 1
+    assert _snapshot_files(brain) == {"raw/vault/a.md", "raw/vault/ok.png"}
+
+
+def test_brain_files_not_copied_as_attachments(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    vault = make_vault({**OBSIDIAN, "a.md": "![[logo.png]] ![l](second-brain/raw/x/pic.png)\n"})
+    brain = vault / "second-brain"
+    init_brain(brain)
+    (brain / "logo.png").write_bytes(b"l")
+    (brain / "raw/x").mkdir()
+    (brain / "raw/x/pic.png").write_bytes(b"p")
+
+    result = take_snapshot(brain, vault, None, BATCH, TODAY)
+
+    assert result.attachments == 0
+
+
+def test_single_note_in_brain_rejected(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    vault = make_vault({**OBSIDIAN, "a.md": "a\n"})
+    brain = vault / "second-brain"
+    init_brain(brain)
+    (brain / "concepts/x.md").write_text("x\n", encoding="utf-8")
+    other = vault / "old-brain"
+    init_brain(other)
+    (other / "raw/s").mkdir()
+    (other / "raw/s/n.md").write_text("n\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="inside the brain"):
+        take_snapshot(brain, brain / "concepts/x.md", None, BATCH, TODAY)
+    with pytest.raises(ValueError, match="raw"):
+        take_snapshot(brain, other / "raw/s/n.md", None, BATCH, TODAY)
+    assert not (brain / ".okf/sources.json").exists()
+
+
+def test_single_note_ignored_rejected(tmp_path: Path, git_vault: Callable[[Files], Path]) -> None:
+    vault = git_vault({**OBSIDIAN, ".gitignore": "private/\n", "private/s.md": "s\n"})
+    brain = _brain(tmp_path)
+
+    with pytest.raises(ValueError, match="git-ignored"):
+        take_snapshot(brain, vault / "private/s.md", None, BATCH, TODAY)

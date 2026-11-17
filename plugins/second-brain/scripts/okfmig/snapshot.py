@@ -128,6 +128,11 @@ def _in_brain_raw(rel: PurePosixPath, root: Path) -> bool:
     return any(p.name == RAW and (root / p.parent / ".okf" / "brain.yaml").is_file() for p in rel.parents)
 
 
+def _covered(rel: PurePosixPath, ignored: set[PurePosixPath]) -> bool:
+    """True when `rel` or one of its ancestors is in `ignored`."""
+    return any(p in ignored for p in (rel, *rel.parents))
+
+
 def _relative(path: Path, root: Path) -> PurePosixPath | None:
     resolved = path.resolve()
     if not resolved.is_relative_to(root):
@@ -136,9 +141,6 @@ def _relative(path: Path, root: Path) -> PurePosixPath | None:
 
 
 def _sources(vault: Vault, root: Path, source: Path, brain_rel: PurePosixPath | None) -> list[PurePosixPath]:
-    if source.is_file():
-        rel = _relative(source, root)
-        return [] if rel is None else [rel]
     scope = _relative(source, root) or PurePosixPath(".")
     candidates = [n.path for n in (*vault.notes, *vault.reserved)] + list(vault.undecodable)
     return sorted(
@@ -146,6 +148,22 @@ def _sources(vault: Vault, root: Path, source: Path, brain_rel: PurePosixPath | 
         for p in candidates
         if _within(p, scope) and not (brain_rel is not None and _within(p, brain_rel)) and not _in_brain_raw(p, root)
     )
+
+
+def _single_source(
+    root: Path, source: Path, brain_rel: PurePosixPath | None, ignored: set[PurePosixPath]
+) -> list[PurePosixPath]:
+    """The single-note source as a vault path; ValueError when it may not be a source."""
+    rel = _relative(source, root)
+    if rel is None:
+        raise ValueError(f"{source}: outside its vault {root}")
+    if brain_rel is not None and _within(rel, brain_rel):
+        raise ValueError(f"{source}: inside the brain; brain pages are never sources")
+    if _in_brain_raw(rel, root):
+        raise ValueError(f"{source}: inside a brain's raw/ folder; snapshots are never sources")
+    if _covered(rel, ignored):
+        raise ValueError(f"{source}: git-ignored; ignored notes are never sources")
+    return [rel]
 
 
 def _summary_date(rel: PurePosixPath, data: bytes, today: date) -> str:
@@ -183,7 +201,14 @@ def _copy_if_different(data: bytes, dest: Path) -> bool:
     return True
 
 
-def _attachments(vault: Vault, root: Path, notes: list[PurePosixPath]) -> set[PurePosixPath]:
+def _attachments(
+    vault: Vault,
+    root: Path,
+    notes: list[PurePosixPath],
+    brain_rel: PurePosixPath | None,
+    ignored: set[PurePosixPath],
+) -> set[PurePosixPath]:
+    """Non-note files embedded by `notes`, excluding git-ignored files and anything under the brain."""
     resolver = Resolver(vault.files, vault.settings.new_file_folder)
     found: set[PurePosixPath] = set()
     for rel in notes:
@@ -196,8 +221,15 @@ def _attachments(vault: Vault, root: Path, notes: list[PurePosixPath]) -> set[Pu
                 path = resolver.resolve(target, rel)[0]
             else:
                 path = _relative(root / rel.parent / target, root)
-            if path is not None and path.suffix.lower() != ".md" and (root / path).is_file():
-                found.add(path)
+            if (
+                path is None
+                or path.suffix.lower() == ".md"
+                or _covered(path, ignored)
+                or (brain_rel is not None and _within(path, brain_rel))
+                or not (root / path).is_file()
+            ):
+                continue
+            found.add(path)
     return found
 
 
@@ -219,13 +251,25 @@ def _validate(source: Path, name: str | None) -> tuple[Path, str]:
     return root, name
 
 
-def _keep_previous(brain: Path, raw_path: str) -> str:
-    """Copy the current snapshot to the workdir unless a previous copy is already pending; its brain path."""
-    previous = f"{PREVIOUS}/{raw_path}"
-    snapshot, kept = brain / raw_path, brain / previous
-    if snapshot.is_file() and not kept.exists():
+def _file_sha256(path: Path) -> str | None:
+    return _sha256(path.read_bytes()) if path.is_file() else None
+
+
+def _keep_previous(brain: Path, entry: LedgerEntry) -> None:
+    """Before the snapshot is overwritten: copy it to the workdir when it is the ingested version."""
+    if entry.ingested_sha256 is None or _file_sha256(brain / entry.raw_path) != entry.ingested_sha256:
+        return
+    kept = brain / PREVIOUS / entry.raw_path
+    if _file_sha256(kept) != entry.ingested_sha256:
         kept.parent.mkdir(parents=True, exist_ok=True)
-        kept.write_bytes(snapshot.read_bytes())
+        kept.write_bytes((brain / entry.raw_path).read_bytes())
+
+
+def _previous(brain: Path, entry: LedgerEntry) -> str | None:
+    """Brain path of the kept copy of the ingested version, or None when no valid copy exists."""
+    previous = f"{PREVIOUS}/{entry.raw_path}"
+    if entry.ingested_sha256 is None or _file_sha256(brain / previous) != entry.ingested_sha256:
+        return None
     return previous
 
 
@@ -255,11 +299,20 @@ def _append_batches(batches: list[Batch], queued: list[BatchItem], size: int) ->
 
 
 def take_snapshot(brain: Path, source: Path, name: str | None, settings: BrainSettings, today: date) -> SnapshotResult:
-    """Copy new and changed sources into `raw/<name>/`, update the ledger and queue them in batches."""
+    """Copy sources into `raw/<name>/`, update the ledger and queue the ones not yet ingested in batches.
+
+    The snapshot follows the origin (`origin_sha256`); queueing follows the ledger's `ingested_sha256`, so a
+    lost workdir never loses work: anything not ingested and not pending is queued again.
+    """
     root, name = _validate(source, name)
     brain = brain.resolve()
-    vault = discover(root, (), ignored_under(root))
-    sources = _sources(vault, root, source, _relative(brain, root))
+    brain_rel = _relative(brain, root)
+    ignored = set(ignored_under(root))
+    vault = discover(root, (), ignored)
+    if source.is_file():
+        sources = _single_source(root, source, brain_rel, ignored)
+    else:
+        sources = _sources(vault, root, source, brain_rel)
 
     ledger = load_ledger(brain)
     batches = load_batches(brain)
@@ -274,24 +327,24 @@ def take_snapshot(brain: Path, source: Path, name: str | None, settings: BrainSe
         data = (root / rel).read_bytes()
         digest = _sha256(data)
         entry = ledger.get(origin)
-        if entry is not None and digest == entry.origin_sha256:
-            result.unchanged.append(origin)
-            continue
         if entry is None:
             page = _summary_page(rel, data, today, taken, brain)
             entry = ledger[origin] = LedgerEntry(f"{RAW}/{name}/{rel}", digest, None, page, today_iso, today_iso)
-            item = BatchItem(origin, entry.raw_path, "new", None, page)
+            _copy_if_different(data, brain / entry.raw_path)
+        elif digest != entry.origin_sha256:
+            _keep_previous(brain, entry)
+            _copy_if_different(data, brain / entry.raw_path)
+            entry.origin_sha256, entry.last_snapshot = digest, today_iso
+        if digest == entry.ingested_sha256 or origin in pending:
+            result.unchanged.append(origin)
+        elif entry.ingested_sha256 is None:
+            queued.append(BatchItem(origin, entry.raw_path, "new", None, entry.summary_page))
             result.new.append(origin)
         else:
-            previous = _keep_previous(brain, entry.raw_path)
-            entry.origin_sha256, entry.last_snapshot = digest, today_iso
-            item = BatchItem(origin, entry.raw_path, "changed", previous, entry.summary_page)
+            queued.append(BatchItem(origin, entry.raw_path, "changed", _previous(brain, entry), entry.summary_page))
             result.changed.append(origin)
-        _copy_if_different(data, brain / entry.raw_path)
-        if origin not in pending:
-            queued.append(item)
 
-    for path in sorted(_attachments(vault, root, sources)):
+    for path in sorted(_attachments(vault, root, sources, brain_rel, ignored)):
         if _copy_if_different((root / path).read_bytes(), brain / RAW / name / path):
             result.attachments += 1
 
