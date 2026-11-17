@@ -2,6 +2,7 @@ import subprocess
 from pathlib import Path, PurePosixPath
 
 from okfmig.gitutil import (
+    commit_times_under,
     dirty_paths,
     ensure_info_exclude,
     ignored_paths,
@@ -52,6 +53,20 @@ def test_last_commit_times(git_vault):
     assert times[PurePosixPath("a.md")] == expected
     assert PurePosixPath(WEIRD) in times
     assert PurePosixPath("untracked.md") not in times
+
+
+def test_commit_times_under_is_relative_to_folder(git_vault):
+    root = git_vault({"brain/concepts/a.md": "1", "other.md": "1"})
+    expected = last_commit_times(root)[PurePosixPath("brain/concepts/a.md")]
+    assert commit_times_under(root / "brain") == {PurePosixPath("concepts/a.md"): expected}
+    assert commit_times_under(root) == last_commit_times(root)
+
+
+def test_commit_times_under_without_commits_or_repo(tmp_path):
+    assert commit_times_under(tmp_path) == {}
+    _git(tmp_path, "init", "-q")
+    (tmp_path / "a.md").write_text("1")
+    assert commit_times_under(tmp_path) == {}
 
 
 def test_info_exclude_idempotent(git_vault):

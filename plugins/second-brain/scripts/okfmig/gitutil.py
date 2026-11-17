@@ -96,6 +96,20 @@ def last_commit_times(root: Path) -> dict[PurePosixPath, str]:
     return times
 
 
+def commit_times_under(root: Path) -> dict[PurePosixPath, str]:
+    """`last_commit_times` keyed relative to `root` (which need not be the repo top-level); {} outside git or
+    in a repo without commits."""
+    try:
+        top = Path(_git(root, "rev-parse", "--show-toplevel").strip()).resolve()
+        times = last_commit_times(top)
+    except subprocess.CalledProcessError, OSError:
+        return {}
+    prefix = PurePosixPath(root.resolve().relative_to(top).as_posix())
+    if prefix == PurePosixPath("."):
+        return times
+    return {PurePosixPath(p.relative_to(prefix).as_posix()): t for p, t in times.items() if p.is_relative_to(prefix)}
+
+
 def mtime_iso(path: Path) -> str:
     ts = path.stat().st_mtime
     return datetime.fromtimestamp(ts).astimezone().isoformat(timespec="seconds")
