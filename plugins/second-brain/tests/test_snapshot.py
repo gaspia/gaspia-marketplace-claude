@@ -132,6 +132,33 @@ def test_summary_page_assignment(tmp_path: Path, make_vault: Callable[[Files], P
     }
 
 
+def test_summary_page_compact_dates(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    vault = make_vault(
+        {
+            **OBSIDIAN,
+            "David Santos 1o1 20261026.md": "1o1\n",
+            "20261027 Standup.md": "standup\n",
+            "Notes 20261399.md": "not a real date\n",
+            "Ticket 123456789.md": "nine digits\n",
+            "Meet 20261001.md": "---\ndate: 2026-09-01\n---\n",
+            "2026-11-02 Sync 20261003.md": "leading date wins\n",
+        }
+    )
+    brain = _brain(tmp_path)
+
+    take_snapshot(brain, vault, None, BATCH, TODAY)
+
+    pages = {origin: e.summary_page for origin, e in load_ledger(brain).items()}
+    assert pages == {
+        "vault:David Santos 1o1 20261026.md": "sources/2026-10-26-david-santos-1o1.md",
+        "vault:20261027 Standup.md": "sources/2026-10-27-standup.md",
+        "vault:Notes 20261399.md": "sources/2026-11-17-notes-20261399.md",
+        "vault:Ticket 123456789.md": "sources/2026-11-17-ticket-123456789.md",
+        "vault:Meet 20261001.md": "sources/2026-09-01-meet-20261001.md",
+        "vault:2026-11-02 Sync 20261003.md": "sources/2026-11-02-sync-20261003.md",
+    }
+
+
 def test_single_note_source_relative_to_vault(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
     vault = make_vault({**OBSIDIAN, "Work/a.md": "a\n", "Work/b.md": "b\n"})
     brain = _brain(tmp_path)

@@ -22,6 +22,7 @@ SOURCES = "sources"
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _LEADING_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})[\s._-]*")
+_COMPACT_DATE = re.compile(r"(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)")
 _BATCH_ID = re.compile(r"^b(\d+)$")
 
 
@@ -167,7 +168,23 @@ def _single_source(
     return [rel]
 
 
-def _summary_date(rel: PurePosixPath, data: bytes, today: date) -> str:
+def _compact_date(stem: str) -> re.Match[str] | None:
+    """The first `YYYYMMDD` in `stem` (not part of a longer number) that is a real date."""
+    for match in _COMPACT_DATE.finditer(stem):
+        try:
+            date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except ValueError:
+            continue
+        return match
+    return None
+
+
+def _summary_date(rel: PurePosixPath, data: bytes, today: date) -> tuple[str, str]:
+    """The summary date and the stem left for the slug: frontmatter `date` or `created`, then a leading
+    `YYYY-MM-DD`, then a `YYYYMMDD` anywhere in the stem, then today. A date taken from the stem leaves it."""
+    stem = rel.stem
+    leading = _LEADING_DATE.match(stem)
+    rest = _LEADING_DATE.sub("", stem, count=1)
     try:
         meta = parse(data.decode("utf-8")).data or {}
     except UnicodeDecodeError:
@@ -177,14 +194,19 @@ def _summary_date(rel: PurePosixPath, data: bytes, today: date) -> str:
         if value is not None:
             match = _DATE.search(str(value))
             if match:
-                return match.group(0)
-    match = _LEADING_DATE.match(rel.stem)
-    return match.group(1) if match else today.isoformat()
+                return match.group(0), rest
+    if leading:
+        return leading.group(1), rest
+    compact = _compact_date(stem)
+    if compact:
+        day = f"{compact.group(1)}-{compact.group(2)}-{compact.group(3)}"
+        return day, stem[: compact.start()] + " " + stem[compact.end() :]
+    return today.isoformat(), stem
 
 
 def _summary_page(rel: PurePosixPath, data: bytes, today: date, taken: set[str], brain: Path) -> str:
-    day = _summary_date(rel, data, today)
-    slug = kebab(_LEADING_DATE.sub("", rel.stem, count=1)) or "note"
+    day, stem = _summary_date(rel, data, today)
+    slug = kebab(stem) or "note"
     base = f"{SOURCES}/{day}-{slug}"
     page, n = f"{base}.md", 1
     while page in taken or (brain / page).exists():
