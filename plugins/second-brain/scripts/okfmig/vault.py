@@ -6,7 +6,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-ALWAYS_EXCLUDED_DIRS = frozenset({".obsidian", ".okf", ".git", ".trash", ".okf-migrate"})
+ALWAYS_EXCLUDED_DIRS = frozenset({".obsidian", ".okf", ".git", ".trash", ".okf-migrate", ".okf-ingest"})
 DEFAULT_EXCLUDED_FILES = ("**/CLAUDE.md", "**/AGENTS.md")
 RESERVED_NAMES = frozenset({"index.md", "log.md"})
 

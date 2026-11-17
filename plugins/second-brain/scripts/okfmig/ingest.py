@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 
 from okfmig import typerules
 from okfmig.apply import BlockedPlanError, StaleFileError, apply_plan
-from okfmig.brain import WIKI_FOLDERS, WORKDIR
+from okfmig.brain import WIKI_FOLDERS
 from okfmig.frontmatter import parse
 from okfmig.gitutil import commit_times_under, ignored_under
 from okfmig.links import linked_paths, relative_href
@@ -145,7 +145,7 @@ def complete_batch(brain: Path, batch_id: str, today: date) -> list[str]:
         raise BatchError(f"batch {batch_id}: origins missing from the ledger: {', '.join(unknown)}")
 
     cfg = typerules.load(brain / ".okf" / "types.yaml")
-    vault = discover(brain, (*cfg.exclude, f"{WORKDIR}/**"), ignored_under(brain))
+    vault = discover(brain, cfg.exclude, ignored_under(brain))
     plan = build_plan(vault, cfg, commit_times_under(brain), today, root_log=False)
     if plan.blocking:
         items = "\n".join(f"  {b}" for b in plan.blocking)
