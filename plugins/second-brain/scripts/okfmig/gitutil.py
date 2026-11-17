@@ -1,4 +1,4 @@
-"""Thin git helpers for the vault (the vault root is the repo top-level)."""
+"""Thin git helpers. A vault or brain is any folder inside a git work tree; `repo_location` gives its prefix."""
 
 import subprocess
 from datetime import datetime
@@ -64,22 +64,52 @@ def ignored_paths(root: Path) -> list[PurePosixPath]:
     return sorted(p for p in paths if not any(parent in paths for parent in p.parents))
 
 
+def repo_location(folder: Path) -> tuple[Path, PurePosixPath] | None:
+    """The top-level of the git work tree holding `folder` and the folder's path from it (`.` at the top), in the
+    letter case git and the file system use; None outside a work tree."""
+    try:
+        top, prefix, *_ = [*_git(folder, "rev-parse", "--show-toplevel", "--show-prefix").split("\n"), "", ""]
+    except subprocess.CalledProcessError, OSError:
+        return None
+    if not top:
+        return None
+    return Path(top).resolve(), PurePosixPath(prefix.rstrip("/") or ".")
+
+
+def _strip(path: PurePosixPath, prefix: PurePosixPath) -> PurePosixPath | None:
+    """`path` (relative to the repo top) relative to `prefix`, or None when it lies outside."""
+    if prefix == PurePosixPath("."):
+        return path
+    return PurePosixPath(path.relative_to(prefix).as_posix()) if path.is_relative_to(prefix) else None
+
+
+def dirty_under(folder: Path) -> list[str]:
+    """Uncommitted changes under `folder`, relative to it, ignoring its `.obsidian/` and `.okf/`; [] outside git."""
+    location = repo_location(folder)
+    if location is None:
+        return []
+    _, prefix = location
+    paths: list[str] = []
+    for path in dirty_paths(folder):
+        rel = _strip(PurePosixPath(path.rstrip("/")), prefix)
+        if rel is not None:
+            paths.append(rel.as_posix() + ("/" if path.endswith("/") else ""))
+    return paths
+
+
 def ignored_under(root: Path) -> list[PurePosixPath]:
     """Git-ignored paths under `root`, relative to `root` (which need not be the repo top-level); [] outside git.
 
     When `root` itself lies inside an ignored directory, the result is `[.]` (everything is ignored).
     """
-    try:
-        top = Path(_git(root, "rev-parse", "--show-toplevel").strip()).resolve()
-        ignored = ignored_paths(top)
-    except subprocess.CalledProcessError, OSError:
+    location = repo_location(root)
+    if location is None:
         return []
-    prefix = PurePosixPath(root.resolve().relative_to(top).as_posix())
-    if prefix == PurePosixPath("."):
-        return ignored
+    top, prefix = location
+    ignored = ignored_paths(top)
     if any(prefix.is_relative_to(p) for p in ignored):
         return [PurePosixPath(".")]
-    return sorted(PurePosixPath(p.relative_to(prefix).as_posix()) for p in ignored if p.is_relative_to(prefix))
+    return sorted(rel for p in ignored if (rel := _strip(p, prefix)) is not None)
 
 
 def last_commit_times(root: Path) -> dict[PurePosixPath, str]:
@@ -99,15 +129,15 @@ def last_commit_times(root: Path) -> dict[PurePosixPath, str]:
 def commit_times_under(root: Path) -> dict[PurePosixPath, str]:
     """`last_commit_times` keyed relative to `root` (which need not be the repo top-level); {} outside git or
     in a repo without commits."""
-    try:
-        top = Path(_git(root, "rev-parse", "--show-toplevel").strip()).resolve()
-        times = last_commit_times(top)
-    except subprocess.CalledProcessError, OSError:
+    location = repo_location(root)
+    if location is None:
         return {}
-    prefix = PurePosixPath(root.resolve().relative_to(top).as_posix())
-    if prefix == PurePosixPath("."):
-        return times
-    return {PurePosixPath(p.relative_to(prefix).as_posix()): t for p, t in times.items() if p.is_relative_to(prefix)}
+    top, prefix = location
+    try:
+        times = last_commit_times(top)
+    except subprocess.CalledProcessError:
+        return {}
+    return {rel: t for p, t in times.items() if (rel := _strip(p, prefix)) is not None}
 
 
 def mtime_iso(path: Path) -> str:

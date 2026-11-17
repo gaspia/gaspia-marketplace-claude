@@ -395,3 +395,47 @@ def test_types_yaml_syntax_error_exits_2(vault: Path, capsys: pytest.CaptureFixt
     code, out = run(capsys, "plan", str(vault))
     assert code == 2
     assert "invalid type rules" in out and "types.yaml" in out
+
+
+SUB_FILES = {
+    "vault/.okf/types.yaml": "default: note\n",
+    "vault/Plain.md": "# Plain\n\nSee [[Other]].\n",
+    "vault/Other.md": "# Other\n",
+    "outside.md": "# Outside the vault\n",
+}
+
+
+@pytest.fixture
+def sub_vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A vault that is the `vault/` subfolder of a bigger repo."""
+    monkeypatch.setenv("GIT_AUTHOR_DATE", STAMP)
+    monkeypatch.setenv("GIT_COMMITTER_DATE", STAMP)
+    repo = tmp_path / "repo"
+    for rel, text in SUB_FILES.items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(text, encoding="utf-8")
+    init_repo(repo)
+    commit_all(repo, "initial")
+    return repo / "vault"
+
+
+def test_vault_in_subfolder_of_repo(sub_vault: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo = sub_vault.parent
+    (repo / "outside.md").write_text("dirty outside the vault\n", encoding="utf-8")
+    v = str(sub_vault)
+    for argv in (("scan", v), ("plan", v, "--today", TODAY), ("apply", v), ("validate", v)):
+        code, out = run(capsys, *argv)
+        assert code == 0, (argv, out)
+    assert "vault/.okf-migrate/" in read(repo, ".git/info/exclude").splitlines()
+    assert read(sub_vault, "Plain.md") == (
+        f"---\ntype: note\ntitle: Plain\ntimestamp: '{STAMP}'\n---\n# Plain\n\nSee [Other](Other.md).\n"
+    )
+    assert read(repo, "outside.md") == "dirty outside the vault\n"
+
+
+def test_vault_in_subfolder_dirty_inside_refused(sub_vault: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (sub_vault / "Plain.md").write_text("changed\n", encoding="utf-8")
+    code, out = run(capsys, "scan", str(sub_vault))
+    assert code == 2
+    assert "  Plain.md" in out
+    assert "vault/Plain.md" not in out
