@@ -173,8 +173,8 @@ def test_brain_inside_source_never_snapshotted(tmp_path: Path, make_vault: Calla
     take_snapshot(brain, vault, None, BATCH, TODAY)
     origins = set(load_ledger(brain))
     assert not any(o.startswith("vault:second-brain/") for o in origins)
-    assert not any(o.startswith("vault:old-brain/raw/") for o in origins)
-    assert "vault:a.md" in origins and "vault:old-brain/concepts/y.md" in origins
+    assert not any(o.startswith("vault:old-brain/") for o in origins)  # any brain's pages, not just its raw/
+    assert origins == {"vault:a.md"}
 
     again = take_snapshot(brain, vault, None, BATCH, TODAY)
     assert again.new == []
@@ -446,3 +446,21 @@ def test_single_note_ignored_rejected(tmp_path: Path, git_vault: Callable[[Files
 
     with pytest.raises(ValueError, match="git-ignored"):
         take_snapshot(brain, vault / "private/s.md", None, BATCH, TODAY)
+
+
+def test_pages_of_any_brain_never_sources(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    """A folder holding `.okf/brain.yaml` is a brain: its pages and files are never sources or attachments,
+    whatever brain path the snapshot was given."""
+    vault = make_vault({**OBSIDIAN, "a.md": "![[pic.png]]\n", "Notes/b.md": "b\n"})
+    other = vault / "Notes/other-brain"
+    init_brain(other)
+    (other / "concepts/y.md").write_text("y\n", encoding="utf-8")
+    (other / "pic.png").write_bytes(b"p")
+    brain = _brain(tmp_path)
+
+    result = take_snapshot(brain, vault, None, BATCH, TODAY)
+
+    assert set(load_ledger(brain)) == {"vault:a.md", "vault:Notes/b.md"}
+    assert result.attachments == 0
+    with pytest.raises(ValueError, match="inside a brain"):
+        take_snapshot(brain, other / "concepts/y.md", None, BATCH, TODAY)

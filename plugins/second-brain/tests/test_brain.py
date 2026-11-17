@@ -1,6 +1,6 @@
 import subprocess
 from collections.abc import Callable
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import pytest
 from okfmig import brain
@@ -104,16 +104,6 @@ def test_outer_vault(tmp_path: Path) -> None:
     (tmp_path / "solo").mkdir()
     (tmp_path / "solo" / ".obsidian").mkdir()
     assert outer_vault(tmp_path / "solo") is None
-
-
-def test_git_toplevel_and_prefix(git_vault: Callable[[Files], Path], tmp_path: Path) -> None:
-    root = git_vault({"second-brain/a.md": "x"})
-    assert brain.git_toplevel(root / "second-brain") == root.resolve()
-    assert brain.brain_prefix(root / "second-brain") == PurePosixPath("second-brain")
-    assert brain.brain_prefix(root) == PurePosixPath(".")
-    plain = tmp_path / "plain"
-    plain.mkdir()
-    assert brain.git_toplevel(plain) is None and brain.brain_prefix(plain) is None
 
 
 def _excludes(root: Path) -> list[str]:

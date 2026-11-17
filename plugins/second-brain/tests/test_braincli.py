@@ -214,3 +214,47 @@ def test_help_lists_subcommands() -> None:
     assert result.returncode == 0
     for name in ("init", "snapshot", "next", "similar", "done", "validate"):
         assert name in result.stdout
+
+
+def _case_insensitive(folder: Path) -> bool:
+    probe = folder / "case-probe-a"
+    probe.mkdir()
+    try:
+        return (folder / "CASE-PROBE-A").exists()
+    finally:
+        probe.rmdir()
+
+
+@pytest.fixture
+def brain_in_vault(tmp_path: Path) -> tuple[Path, Path]:
+    """A vault repo holding an initialized, committed brain in `second-brain/`."""
+    if not _case_insensitive(tmp_path):
+        pytest.skip("needs a case-insensitive file system")
+    vault = _repo(tmp_path / "vault")
+    _write(vault, {**OBSIDIAN, "Onboarding.md": ONBOARDING})
+    brain = vault / "second-brain"
+    assert main(["init", str(brain)]) == 0
+    _write(brain, {"concepts/embeddings.md": EMBEDDINGS})
+    _commit(vault)
+    return vault, brain
+
+
+def test_mixed_case_brain_path_skips_brain_pages(
+    brain_in_vault: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    vault, brain = brain_in_vault
+    assert main(["snapshot", str(vault / "Second-Brain"), str(vault), "--today", TODAY]) == 0
+    assert "new: 2," in capsys.readouterr().out  # README.md and Onboarding.md
+    ledger = (brain / ".okf/sources.json").read_text(encoding="utf-8")
+    assert "vault:Onboarding.md" in ledger
+    assert "embeddings" not in ledger
+
+
+def test_mixed_case_brain_path_dirty_brain_exits_2(
+    brain_in_vault: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    vault, brain = brain_in_vault
+    _write(brain, {"concepts/draft.md": "# Draft\n"})
+    capsys.readouterr()
+    assert main(["snapshot", str(vault / "SECOND-BRAIN"), str(vault / "onboarding.md"), "--today", TODAY]) == 2
+    assert "  concepts/draft.md" in capsys.readouterr().err

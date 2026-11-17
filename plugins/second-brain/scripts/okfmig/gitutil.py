@@ -1,6 +1,8 @@
 """Thin git helpers. A vault or brain is any folder inside a git work tree; `repo_location` gives its prefix."""
 
+import os
 import subprocess
+import unicodedata
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
@@ -138,6 +140,29 @@ def commit_times_under(root: Path) -> dict[PurePosixPath, str]:
     except subprocess.CalledProcessError:
         return {}
     return {rel: t for p, t in times.items() if (rel := _strip(p, prefix)) is not None}
+
+
+def canonical(path: Path) -> Path:
+    """`path` made absolute, symlinks resolved and every existing component spelled as on disk.
+
+    On a case-insensitive file system `Second-Brain` and `second-brain` name one folder, but git paths and the
+    path comparisons here only match the on-disk spelling.
+    """
+    path = path.resolve()
+    result = Path(path.anchor)
+    for part in path.parts[1:]:
+        name = part
+        try:
+            names = os.listdir(result)
+        except OSError:
+            names = []
+        if name not in names:
+            key = unicodedata.normalize("NFC", name).casefold()
+            matches = [n for n in names if unicodedata.normalize("NFC", n).casefold() == key]
+            if len(matches) == 1:
+                name = matches[0]
+        result = result / name
+    return result
 
 
 def mtime_iso(path: Path) -> str:

@@ -123,9 +123,10 @@ def _within(path: PurePosixPath, folder: PurePosixPath) -> bool:
     return path.is_relative_to(folder)
 
 
-def _in_brain_raw(rel: PurePosixPath, root: Path) -> bool:
-    """True when `rel` lies under the `raw/` folder of a brain (a folder holding `.okf/brain.yaml`)."""
-    return any(p.name == RAW and (root / p.parent / ".okf" / "brain.yaml").is_file() for p in rel.parents)
+def _in_a_brain(rel: PurePosixPath, root: Path) -> bool:
+    """True when `rel` lies in a brain (a folder holding `.okf/brain.yaml`): a file-system check, so it holds
+    for any brain and whatever spelling the brain path was given in."""
+    return any((root / p / ".okf" / "brain.yaml").is_file() for p in rel.parents)
 
 
 def _covered(rel: PurePosixPath, ignored: set[PurePosixPath]) -> bool:
@@ -146,7 +147,7 @@ def _sources(vault: Vault, root: Path, source: Path, brain_rel: PurePosixPath | 
     return sorted(
         p
         for p in candidates
-        if _within(p, scope) and not (brain_rel is not None and _within(p, brain_rel)) and not _in_brain_raw(p, root)
+        if _within(p, scope) and not (brain_rel is not None and _within(p, brain_rel)) and not _in_a_brain(p, root)
     )
 
 
@@ -159,8 +160,8 @@ def _single_source(
         raise ValueError(f"{source}: outside its vault {root}")
     if brain_rel is not None and _within(rel, brain_rel):
         raise ValueError(f"{source}: inside the brain; brain pages are never sources")
-    if _in_brain_raw(rel, root):
-        raise ValueError(f"{source}: inside a brain's raw/ folder; snapshots are never sources")
+    if _in_a_brain(rel, root):
+        raise ValueError(f"{source}: inside a brain; brain pages and snapshots are never sources")
     if _covered(rel, ignored):
         raise ValueError(f"{source}: git-ignored; ignored notes are never sources")
     return [rel]
@@ -208,7 +209,7 @@ def _attachments(
     brain_rel: PurePosixPath | None,
     ignored: set[PurePosixPath],
 ) -> set[PurePosixPath]:
-    """Non-note files embedded by `notes`, excluding git-ignored files and anything under the brain."""
+    """Non-note files embedded by `notes`, excluding git-ignored files and anything under a brain."""
     resolver = Resolver(vault.files, vault.settings.new_file_folder)
     found: set[PurePosixPath] = set()
     for rel in notes:
@@ -226,6 +227,7 @@ def _attachments(
                 or path.suffix.lower() == ".md"
                 or _covered(path, ignored)
                 or (brain_rel is not None and _within(path, brain_rel))
+                or _in_a_brain(path, root)
                 or not (root / path).is_file()
             ):
                 continue

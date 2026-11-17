@@ -1,7 +1,9 @@
 import subprocess
 from pathlib import Path, PurePosixPath
 
+import pytest
 from okfmig.gitutil import (
+    canonical,
     commit_times_under,
     dirty_paths,
     dirty_under,
@@ -138,3 +140,18 @@ def test_dirty_under_is_relative_to_folder(git_vault):
         "brain/new.md",
         "other.md",
     ]
+
+
+def test_canonical_spells_existing_components_as_on_disk(tmp_path):
+    (tmp_path / "Repo/second-brain").mkdir(parents=True)
+    (tmp_path / "Repo/second-brain/Note.md").write_text("x")
+    if not (tmp_path / "REPO").exists():
+        pytest.skip("needs a case-insensitive file system")
+    base = tmp_path.resolve()
+    assert canonical(tmp_path / "repo/SECOND-BRAIN/note.md") == base / "Repo/second-brain/Note.md"
+    assert canonical(tmp_path / "REPO/Second-Brain/New Folder") == base / "Repo/second-brain/New Folder"
+
+
+def test_canonical_keeps_exact_paths(tmp_path):
+    (tmp_path / "a").mkdir()
+    assert canonical(tmp_path / "a" / ".." / "a" / "b") == tmp_path.resolve() / "a/b"
