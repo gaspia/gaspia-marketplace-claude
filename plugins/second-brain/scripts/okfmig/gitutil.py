@@ -99,6 +99,11 @@ def dirty_under(folder: Path) -> list[str]:
     return paths
 
 
+def has_changes(folder: Path, rel: str) -> bool:
+    """True when `rel` (relative to `folder`) is modified, staged or untracked against HEAD."""
+    return bool(_git(folder, "status", "--porcelain", "--untracked-files=all", "--", rel).strip())
+
+
 def ignored_under(root: Path) -> list[PurePosixPath]:
     """Git-ignored paths under `root`, relative to `root` (which need not be the repo top-level); [] outside git.
 

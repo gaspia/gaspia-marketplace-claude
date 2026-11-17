@@ -9,7 +9,7 @@ from okfmig import typerules
 from okfmig.apply import BlockedPlanError, StaleFileError, apply_plan
 from okfmig.brain import WIKI_FOLDERS
 from okfmig.frontmatter import parse
-from okfmig.gitutil import commit_times_under, ignored_under
+from okfmig.gitutil import commit_times_under, has_changes, ignored_under, repo_location
 from okfmig.links import linked_paths, relative_href
 from okfmig.planner import build_plan
 from okfmig.reserved import add_log_entry
@@ -139,6 +139,13 @@ def complete_batch(brain: Path, batch_id: str, today: date) -> list[str]:
     missing = [item.summary_page for item in batch.items if not (brain / item.summary_page).is_file()]
     if missing:
         raise BatchError(f"batch {batch_id}: missing summary pages: {', '.join(missing)}")
+    if repo_location(brain) is not None:  # snapshot needs a clean brain: an untouched summary was not processed
+        stale = [item.summary_page for item in batch.items if not has_changes(brain, item.summary_page)]
+        if stale:
+            raise BatchError(
+                f"batch {batch_id}: summary pages not updated since the snapshot (process each source and record "
+                f"what changed in its summary): {', '.join(stale)}"
+            )
     ledger = load_ledger(brain)
     unknown = [item.origin for item in batch.items if item.origin not in ledger]
     if unknown:

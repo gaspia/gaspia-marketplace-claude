@@ -1,3 +1,4 @@
+import subprocess
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path, PurePosixPath
@@ -36,7 +37,9 @@ def _write(root: Path, files: dict[str, str]) -> None:
 
 
 def _tree(root: Path) -> dict[str, bytes]:
-    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+    """Every file under `root` except git's own (`git status` refreshes its index)."""
+    files = (p for p in sorted(root.rglob("*")) if p.is_file() and ".git" not in p.relative_to(root).parts)
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in files}
 
 
 def _brain(
@@ -255,5 +258,46 @@ def test_complete_batch_deletes_previous_copies(tmp_path: Path, make_vault: Call
     complete_batch(brain, batch.id, TODAY)
 
     assert not (brain / previous).exists()
+    entry = load_ledger(brain)["vault:Onboarding.md"]
+    assert entry.ingested_sha256 == entry.origin_sha256
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+def _git_brain(tmp_path: Path, make_vault: Callable[[Files], Path]) -> Path:
+    """A brain in its own committed git repo, with the Onboarding source snapshotted (batch b001 pending)."""
+    brain = tmp_path / "brain"
+    init_brain(brain)
+    for args in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "T"]):
+        _git(brain, *args)
+    _git(brain, "config", "commit.gpgsign", "false")
+    _git(brain, "add", "-A")
+    _git(brain, "commit", "-q", "-m", "init")
+    vault = make_vault({**OBSIDIAN, "Onboarding.md": ONBOARDING})
+    take_snapshot(brain, vault, None, DEFAULTS, TODAY)
+    return brain
+
+
+def test_changed_source_needs_its_summary_updated(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _git_brain(tmp_path, make_vault)
+    _write(brain, {SUMMARY: SUMMARY_TEXT})
+    complete_batch(brain, "b001", TODAY)  # a new source: its summary page is untracked
+    _git(brain, "add", "-A")
+    _git(brain, "commit", "-q", "-m", "b001")
+    (tmp_path / "vault/Onboarding.md").write_text(ONBOARDING + "\nMore.\n", encoding="utf-8")
+    take_snapshot(brain, tmp_path / "vault", None, DEFAULTS, TODAY)
+    [batch] = load_batches(brain)
+    assert batch.items[0].status == "changed"
+    before = _tree(brain)
+
+    with pytest.raises(BatchError, match=rf"not updated.*{SUMMARY}"):
+        complete_batch(brain, batch.id, TODAY)
+    assert _tree(brain) == before
+
+    summary = brain / SUMMARY
+    summary.write_text(summary.read_text(encoding="utf-8") + "\n## Changes\n\nAdded More.\n", encoding="utf-8")
+    complete_batch(brain, batch.id, TODAY)
     entry = load_ledger(brain)["vault:Onboarding.md"]
     assert entry.ingested_sha256 == entry.origin_sha256
