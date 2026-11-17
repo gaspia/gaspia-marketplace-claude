@@ -64,6 +64,24 @@ def ignored_paths(root: Path) -> list[PurePosixPath]:
     return sorted(p for p in paths if not any(parent in paths for parent in p.parents))
 
 
+def ignored_under(root: Path) -> list[PurePosixPath]:
+    """Git-ignored paths under `root`, relative to `root` (which need not be the repo top-level); [] outside git.
+
+    When `root` itself lies inside an ignored directory, the result is `[.]` (everything is ignored).
+    """
+    try:
+        top = Path(_git(root, "rev-parse", "--show-toplevel").strip()).resolve()
+        ignored = ignored_paths(top)
+    except subprocess.CalledProcessError, OSError:
+        return []
+    prefix = PurePosixPath(root.resolve().relative_to(top).as_posix())
+    if prefix == PurePosixPath("."):
+        return ignored
+    if any(prefix.is_relative_to(p) for p in ignored):
+        return [PurePosixPath(".")]
+    return sorted(PurePosixPath(p.relative_to(prefix).as_posix()) for p in ignored if p.is_relative_to(prefix))
+
+
 def last_commit_times(root: Path) -> dict[PurePosixPath, str]:
     """Newest commit time (ISO 8601 with offset) per tracked path."""
     out = _git(root, "log", "--format=%x00%cI", "--name-only")
