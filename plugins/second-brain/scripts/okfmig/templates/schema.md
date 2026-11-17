@@ -21,7 +21,7 @@ relative links, git. Claude owns the wiki and edits it; the user reads, reviews 
 | `area` | `areas/` | Ongoing responsibility, no end. Scope, Projects, People. |
 | `person` | `people/` | Role, Team, Works on, Decisions. Optional `## Personal` and `## Performance` sections. |
 | `decision` | `decisions/` | ADR style. Decision, Date, Context, Alternatives considered, Consequences, linked project or area. |
-| `source` | `sources/` | One summary per ingested source: Origin, Summary, Key takeaways, Pages updated. |
+| `source` | `sources/` | One summary per ingested source, at `sources/<YYYY-MM-DD>-<slug>.md` (path assigned by `snapshot`, printed by `next`): Origin, Summary, Key takeaways, Pages updated, Citations. |
 
 Meetings, 1:1s and training notes are sources, not wiki pages. Their content flows into the pages above.
 
@@ -32,8 +32,11 @@ Meetings, 1:1s and training notes are sources, not wiki pages. Their content flo
   `{resource, title}` entries (`resource` is the relative path to the raw snapshot) for every source that contributed.
   Add `status: inferred` when a page holds inferred content, and end each inferred sentence with `(inferred)`.
 - Links are standard relative markdown links, never wikilinks. Link related pages inline.
-- Citations: end every page that uses source material with a `# Citations` section, a numbered list linking the raw
-  snapshots. Claims cite them as `[1]`.
+- Citations: end every page that uses source material, source summaries included, with a `# Citations` section, a
+  numbered list linking the raw snapshots. Claims cite them as `[1]`.
+- When a page earns its place: create a person, project or area page only when a source states at least one cited
+  fact beyond the name, or for the counterpart of a 1:1. A bare name stays inline as plain text.
+- Sections: use the headings of the type, in order. Omit empty sections, never placeholder text ("None recorded").
 - Never invent facts. If a fact is in no source, leave it out or mark it inferred.
 - Prefer editing an existing page to creating a duplicate. Keep content the user wrote by hand; edit, never regenerate.
 - Ask when unsure whether two notes describe the same idea, person, project, area or decision.

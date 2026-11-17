@@ -119,3 +119,15 @@ def test_init_git_exclude_subfolder_and_top(git_vault: Callable[[Files], Path], 
     subprocess.run(["git", "init", "-q"], cwd=other, check=True)
     init_brain(other)
     assert ".okf-ingest/" in _excludes(other)
+
+
+def test_schema_template_mirrors_page_types() -> None:
+    text = brain.SCHEMA_TEMPLATE.read_text(encoding="utf-8")
+    for rule in (
+        "sources/<YYYY-MM-DD>-<slug>.md",
+        "When a page earns its place",
+        "never placeholder text",
+        "`# Citations`",
+    ):
+        assert rule in text, rule
+    assert "—" not in text
