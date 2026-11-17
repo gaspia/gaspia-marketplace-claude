@@ -6,8 +6,11 @@ Read this before writing any page. The brain's `CLAUDE.md` schema section states
 
 - **Folder and filename.** One folder per type (table below). Filenames are kebab-case (`team-north-star.md`). The `type` value matches the folder; `done` refuses while a page sits outside the wiki folders, so move it into one.
 - **Prefer editing.** Run `similar` before creating a page. Edit an existing page in place: add sentences, list items and citations; keep everything already there, including text the user wrote by hand. Never regenerate a page from scratch.
+- **When a page earns its place.** Create a person, project or area page only when a source states at least one cited fact beyond the name (a role, a team, what they work on, decided or own), or when the person is the counterpart of a 1:1. A name with nothing else stays inline, as plain text, on the page where it appears. List such name-only mentions in the review draft as a judgment call, not as a duplicate question.
+- **Duplicate questions** are only for a `similar` hit, or for two items in the same draft that might be the same thing.
+- **Sections.** Use the headings listed for the type, in that order, and only those with something cited to say: omit a section that would be empty, and never write placeholder text such as "Not stated in the source" or "None recorded". Extra sections (for example `## Success criteria` on a project) may follow the listed ones. `## Open questions` holds only questions.
 - **Frontmatter.**
-  - `type`, `title`, `description` (one sentence), `tags` (a list, may be empty).
+  - `type`, `title`, `description` (one sentence saying who or what the page is about), `tags` (a list, may be empty).
   - `timestamp`: ISO 8601 date-time of this edit (`2026-11-17T10:30:00+00:00`). `done` fills a missing `type`, `title` or `timestamp` from the folder rules, but write them anyway.
   - `sources`: one `{resource, title}` entry per source that contributed to the page. `resource` is the relative path to the raw snapshot, either from the page (`../raw/...`) or from the brain root (`raw/...`); use the page-relative form. Add an entry when a new source contributes; never drop one.
   - `status: inferred` when the page holds any inferred sentence. Each inferred sentence also ends with `(inferred)`. Inferred means a reasonable reading that no source states outright; a fact in no source and not inferable is left out.
@@ -32,7 +35,7 @@ Meetings, 1:1s and training notes are sources, never wiki pages of their own. Th
 
 ### concept
 
-Short plain-language definition first (one or two sentences, no heading), then `## Details`, `## Examples`, `## Related concepts`. Omit a section that has nothing cited to say.
+Short plain-language definition first (one or two sentences, no heading), then `## Details`, `## Examples`, `## Related concepts`.
 
 ```markdown
 ---
