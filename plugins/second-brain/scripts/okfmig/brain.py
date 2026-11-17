@@ -1,7 +1,6 @@
 """Second brain: settings, layout and init."""
 
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
@@ -9,7 +8,7 @@ from typing import Any, Literal
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from okfmig.gitutil import ensure_info_exclude
+from okfmig.gitutil import ensure_info_exclude, repo_location
 
 WIKI_FOLDERS: dict[str, str] = {
     "concepts": "concept",
@@ -89,30 +88,6 @@ def load_settings(brain: Path) -> BrainSettings:
             raise ValueError(f"{path}: people.{key} {value!r} must be true or false")
         flags[key] = value
     return BrainSettings(mode, size, flags["personal"], flags["performance"])
-
-
-def git_toplevel(path: Path) -> Path | None:
-    """The top-level of the git work tree containing `path`, or None."""
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        )
-    except subprocess.CalledProcessError, OSError:
-        return None
-    top = result.stdout.strip()
-    return Path(top).resolve() if top else None
-
-
-def brain_prefix(brain: Path) -> PurePosixPath | None:
-    """The brain's path relative to its repo top-level (`.` when equal), or None outside a repo."""
-    top = git_toplevel(brain)
-    if top is None:
-        return None
-    return PurePosixPath(brain.resolve().relative_to(top).as_posix())
 
 
 def outer_vault(brain: Path) -> Path | None:
@@ -202,9 +177,9 @@ def init_brain(brain: Path) -> list[str]:
         changed.append(".okf/types.yaml")
     if _write_schema(brain / "CLAUDE.md"):
         changed.append("CLAUDE.md")
-    top = git_toplevel(brain)
-    prefix = brain_prefix(brain)
-    if top is not None and prefix is not None:
+    location = repo_location(brain)
+    if location is not None:
+        top, prefix = location
         entry = f"{WORKDIR}/" if prefix == PurePosixPath(".") else f"{prefix}/{WORKDIR}/"
         ensure_info_exclude(top, entry)
     return changed

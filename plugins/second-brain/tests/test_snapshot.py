@@ -132,6 +132,33 @@ def test_summary_page_assignment(tmp_path: Path, make_vault: Callable[[Files], P
     }
 
 
+def test_summary_page_compact_dates(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    vault = make_vault(
+        {
+            **OBSIDIAN,
+            "David Santos 1o1 20261026.md": "1o1\n",
+            "20261027 Standup.md": "standup\n",
+            "Notes 20261399.md": "not a real date\n",
+            "Ticket 123456789.md": "nine digits\n",
+            "Meet 20261001.md": "---\ndate: 2026-09-01\n---\n",
+            "2026-11-02 Sync 20261003.md": "leading date wins\n",
+        }
+    )
+    brain = _brain(tmp_path)
+
+    take_snapshot(brain, vault, None, BATCH, TODAY)
+
+    pages = {origin: e.summary_page for origin, e in load_ledger(brain).items()}
+    assert pages == {
+        "vault:David Santos 1o1 20261026.md": "sources/2026-10-26-david-santos-1o1.md",
+        "vault:20261027 Standup.md": "sources/2026-10-27-standup.md",
+        "vault:Notes 20261399.md": "sources/2026-11-17-notes-20261399.md",
+        "vault:Ticket 123456789.md": "sources/2026-11-17-ticket-123456789.md",
+        "vault:Meet 20261001.md": "sources/2026-09-01-meet-20261001.md",
+        "vault:2026-11-02 Sync 20261003.md": "sources/2026-11-02-sync-20261003.md",
+    }
+
+
 def test_single_note_source_relative_to_vault(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
     vault = make_vault({**OBSIDIAN, "Work/a.md": "a\n", "Work/b.md": "b\n"})
     brain = _brain(tmp_path)
@@ -173,8 +200,8 @@ def test_brain_inside_source_never_snapshotted(tmp_path: Path, make_vault: Calla
     take_snapshot(brain, vault, None, BATCH, TODAY)
     origins = set(load_ledger(brain))
     assert not any(o.startswith("vault:second-brain/") for o in origins)
-    assert not any(o.startswith("vault:old-brain/raw/") for o in origins)
-    assert "vault:a.md" in origins and "vault:old-brain/concepts/y.md" in origins
+    assert not any(o.startswith("vault:old-brain/") for o in origins)  # any brain's pages, not just its raw/
+    assert origins == {"vault:a.md"}
 
     again = take_snapshot(brain, vault, None, BATCH, TODAY)
     assert again.new == []
@@ -446,3 +473,21 @@ def test_single_note_ignored_rejected(tmp_path: Path, git_vault: Callable[[Files
 
     with pytest.raises(ValueError, match="git-ignored"):
         take_snapshot(brain, vault / "private/s.md", None, BATCH, TODAY)
+
+
+def test_pages_of_any_brain_never_sources(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    """A folder holding `.okf/brain.yaml` is a brain: its pages and files are never sources or attachments,
+    whatever brain path the snapshot was given."""
+    vault = make_vault({**OBSIDIAN, "a.md": "![[pic.png]]\n", "Notes/b.md": "b\n"})
+    other = vault / "Notes/other-brain"
+    init_brain(other)
+    (other / "concepts/y.md").write_text("y\n", encoding="utf-8")
+    (other / "pic.png").write_bytes(b"p")
+    brain = _brain(tmp_path)
+
+    result = take_snapshot(brain, vault, None, BATCH, TODAY)
+
+    assert set(load_ledger(brain)) == {"vault:a.md", "vault:Notes/b.md"}
+    assert result.attachments == 0
+    with pytest.raises(ValueError, match="inside a brain"):
+        take_snapshot(brain, other / "concepts/y.md", None, BATCH, TODAY)

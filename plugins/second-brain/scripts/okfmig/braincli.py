@@ -3,10 +3,10 @@
 import argparse
 import sys
 from datetime import date
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from okfmig import gitutil
-from okfmig.brain import brain_prefix, git_toplevel, init_brain, load_settings, outer_vault
+from okfmig.brain import init_brain, load_settings, outer_vault
 from okfmig.brainvalidate import validate_brain
 from okfmig.ingest import BatchError, complete_batch, similar_pages
 from okfmig.snapshot import load_batches, take_snapshot
@@ -19,8 +19,6 @@ COMMANDS = {
     "done": "Mark a batch ingested: normalize pages, update the ledger and log",
     "validate": "Validate the brain: OKF checks plus the brain rules",
 }
-# paths whose changes never block a snapshot: the ledger and settings change during runs
-_ALWAYS_CLEAN = (".obsidian", ".okf")
 
 
 class _Exit(Exception):
@@ -69,31 +67,14 @@ def _init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _blocking_dirty(brain: Path) -> list[str]:
-    """Uncommitted changes under the brain (brain-relative), ignoring `.obsidian/` and `.okf/`."""
-    top = git_toplevel(brain)
-    prefix = brain_prefix(brain)
-    assert top is not None and prefix is not None
-    dirty: list[str] = []
-    for path in gitutil.dirty_paths(top):
-        repo_path = PurePosixPath(path.rstrip("/"))
-        if not repo_path.is_relative_to(prefix):
-            continue
-        rel = repo_path.relative_to(prefix)
-        if rel.parts and rel.parts[0] in _ALWAYS_CLEAN:
-            continue
-        dirty.append(rel.as_posix())
-    return dirty
-
-
 def _snapshot(args: argparse.Namespace) -> int:
     brain = args.brain
-    if git_toplevel(brain) is None:
+    if gitutil.repo_location(brain) is None:
         raise _Exit(2, f"error: {brain} is not inside a git repository")
     settings = load_settings(brain)
     if load_batches(brain):
         raise _Exit(1, "pending batches exist; run next/done first")
-    dirty = _blocking_dirty(brain)
+    dirty = gitutil.dirty_under(brain)  # `.obsidian/` and `.okf/` (ledger, settings) never block
     if dirty:
         lines = "\n".join(f"  {p}" for p in dirty)
         raise _Exit(2, f"error: uncommitted changes in the brain (commit or stash them first):\n{lines}")
@@ -170,12 +151,13 @@ HANDLERS = {
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    args.brain = args.brain.resolve()
+    # on-disk letter case: git paths and the brain-inside-source checks compare spellings
+    args.brain = gitutil.canonical(args.brain)
     if args.command != "init" and not args.brain.is_dir():
         print(f"error: brain is not a directory: {args.brain}", file=sys.stderr)
         return 2
     if args.command == "snapshot":
-        args.source = args.source.resolve()
+        args.source = gitutil.canonical(args.source)
     try:
         return HANDLERS[args.command](args)
     except _Exit as exc:

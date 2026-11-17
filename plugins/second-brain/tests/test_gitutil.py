@@ -1,14 +1,18 @@
 import subprocess
 from pathlib import Path, PurePosixPath
 
+import pytest
 from okfmig.gitutil import (
+    canonical,
     commit_times_under,
     dirty_paths,
+    dirty_under,
     ensure_info_exclude,
     ignored_paths,
     is_repo,
     last_commit_times,
     mtime_iso,
+    repo_location,
 )
 
 WEIRD = "Eval&Community/Chat with Architect - João.md"
@@ -106,3 +110,48 @@ def test_ignored_paths_lists_untracked_ignored_dirs_and_files(git_vault):
     (root / "only" / "y.tmp.md").write_text("t")
     # a directory holding only ignored files is reported once, without its contents
     assert ignored_paths(root) == [PurePosixPath(p) for p in ("only", "private", "sub/x.tmp.md")]
+
+
+def test_repo_location_top_and_subfolder(git_vault):
+    root = git_vault({"brain/concepts/a.md": "1"})
+    assert repo_location(root) == (root.resolve(), PurePosixPath("."))
+    assert repo_location(root / "brain/concepts") == (root.resolve(), PurePosixPath("brain/concepts"))
+
+
+def test_repo_location_outside_git(tmp_path):
+    assert repo_location(tmp_path) is None
+
+
+def test_dirty_under_is_relative_to_folder(git_vault):
+    root = git_vault({"brain/a.md": "1", "other.md": "1", "brain/.obsidian/x.json": "{}"})
+    (root / "other.md").write_text("2")
+    (root / "brain/.okf").mkdir()
+    (root / "brain/.okf/types.yaml").write_text("t: 1")
+    (root / "brain/.obsidian/x.json").write_text("{1}")
+    assert dirty_under(root / "brain") == []
+    (root / "brain/a.md").write_text("2")
+    (root / "brain/new.md").write_text("n")
+    assert sorted(dirty_under(root / "brain")) == ["a.md", "new.md"]
+    # from the top, the brain's own .obsidian/ and .okf/ are ordinary content
+    assert sorted(dirty_under(root)) == [
+        "brain/.obsidian/x.json",
+        "brain/.okf/types.yaml",
+        "brain/a.md",
+        "brain/new.md",
+        "other.md",
+    ]
+
+
+def test_canonical_spells_existing_components_as_on_disk(tmp_path):
+    (tmp_path / "Repo/second-brain").mkdir(parents=True)
+    (tmp_path / "Repo/second-brain/Note.md").write_text("x")
+    if not (tmp_path / "REPO").exists():
+        pytest.skip("needs a case-insensitive file system")
+    base = tmp_path.resolve()
+    assert canonical(tmp_path / "repo/SECOND-BRAIN/note.md") == base / "Repo/second-brain/Note.md"
+    assert canonical(tmp_path / "REPO/Second-Brain/New Folder") == base / "Repo/second-brain/New Folder"
+
+
+def test_canonical_keeps_exact_paths(tmp_path):
+    (tmp_path / "a").mkdir()
+    assert canonical(tmp_path / "a" / ".." / "a" / "b") == tmp_path.resolve() / "a/b"

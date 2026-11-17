@@ -1,6 +1,6 @@
 import subprocess
 from collections.abc import Callable
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import pytest
 from okfmig import brain
@@ -106,16 +106,6 @@ def test_outer_vault(tmp_path: Path) -> None:
     assert outer_vault(tmp_path / "solo") is None
 
 
-def test_git_toplevel_and_prefix(git_vault: Callable[[Files], Path], tmp_path: Path) -> None:
-    root = git_vault({"second-brain/a.md": "x"})
-    assert brain.git_toplevel(root / "second-brain") == root.resolve()
-    assert brain.brain_prefix(root / "second-brain") == PurePosixPath("second-brain")
-    assert brain.brain_prefix(root) == PurePosixPath(".")
-    plain = tmp_path / "plain"
-    plain.mkdir()
-    assert brain.git_toplevel(plain) is None and brain.brain_prefix(plain) is None
-
-
 def _excludes(root: Path) -> list[str]:
     return (root / ".git" / "info" / "exclude").read_text(encoding="utf-8").splitlines()
 
@@ -129,3 +119,15 @@ def test_init_git_exclude_subfolder_and_top(git_vault: Callable[[Files], Path], 
     subprocess.run(["git", "init", "-q"], cwd=other, check=True)
     init_brain(other)
     assert ".okf-ingest/" in _excludes(other)
+
+
+def test_schema_template_mirrors_page_types() -> None:
+    text = brain.SCHEMA_TEMPLATE.read_text(encoding="utf-8")
+    for rule in (
+        "sources/<YYYY-MM-DD>-<slug>.md",
+        "When a page earns its place",
+        "never placeholder text",
+        "`# Citations`",
+    ):
+        assert rule in text, rule
+    assert "—" not in text

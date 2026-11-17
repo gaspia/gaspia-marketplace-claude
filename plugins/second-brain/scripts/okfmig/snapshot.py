@@ -22,6 +22,7 @@ SOURCES = "sources"
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _LEADING_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})[\s._-]*")
+_COMPACT_DATE = re.compile(r"(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)")
 _BATCH_ID = re.compile(r"^b(\d+)$")
 
 
@@ -123,9 +124,10 @@ def _within(path: PurePosixPath, folder: PurePosixPath) -> bool:
     return path.is_relative_to(folder)
 
 
-def _in_brain_raw(rel: PurePosixPath, root: Path) -> bool:
-    """True when `rel` lies under the `raw/` folder of a brain (a folder holding `.okf/brain.yaml`)."""
-    return any(p.name == RAW and (root / p.parent / ".okf" / "brain.yaml").is_file() for p in rel.parents)
+def _in_a_brain(rel: PurePosixPath, root: Path) -> bool:
+    """True when `rel` lies in a brain (a folder holding `.okf/brain.yaml`): a file-system check, so it holds
+    for any brain and whatever spelling the brain path was given in."""
+    return any((root / p / ".okf" / "brain.yaml").is_file() for p in rel.parents)
 
 
 def _covered(rel: PurePosixPath, ignored: set[PurePosixPath]) -> bool:
@@ -146,7 +148,7 @@ def _sources(vault: Vault, root: Path, source: Path, brain_rel: PurePosixPath | 
     return sorted(
         p
         for p in candidates
-        if _within(p, scope) and not (brain_rel is not None and _within(p, brain_rel)) and not _in_brain_raw(p, root)
+        if _within(p, scope) and not (brain_rel is not None and _within(p, brain_rel)) and not _in_a_brain(p, root)
     )
 
 
@@ -159,14 +161,30 @@ def _single_source(
         raise ValueError(f"{source}: outside its vault {root}")
     if brain_rel is not None and _within(rel, brain_rel):
         raise ValueError(f"{source}: inside the brain; brain pages are never sources")
-    if _in_brain_raw(rel, root):
-        raise ValueError(f"{source}: inside a brain's raw/ folder; snapshots are never sources")
+    if _in_a_brain(rel, root):
+        raise ValueError(f"{source}: inside a brain; brain pages and snapshots are never sources")
     if _covered(rel, ignored):
         raise ValueError(f"{source}: git-ignored; ignored notes are never sources")
     return [rel]
 
 
-def _summary_date(rel: PurePosixPath, data: bytes, today: date) -> str:
+def _compact_date(stem: str) -> re.Match[str] | None:
+    """The first `YYYYMMDD` in `stem` (not part of a longer number) that is a real date."""
+    for match in _COMPACT_DATE.finditer(stem):
+        try:
+            date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except ValueError:
+            continue
+        return match
+    return None
+
+
+def _summary_date(rel: PurePosixPath, data: bytes, today: date) -> tuple[str, str]:
+    """The summary date and the stem left for the slug: frontmatter `date` or `created`, then a leading
+    `YYYY-MM-DD`, then a `YYYYMMDD` anywhere in the stem, then today. A date taken from the stem leaves it."""
+    stem = rel.stem
+    leading = _LEADING_DATE.match(stem)
+    rest = _LEADING_DATE.sub("", stem, count=1)
     try:
         meta = parse(data.decode("utf-8")).data or {}
     except UnicodeDecodeError:
@@ -176,14 +194,19 @@ def _summary_date(rel: PurePosixPath, data: bytes, today: date) -> str:
         if value is not None:
             match = _DATE.search(str(value))
             if match:
-                return match.group(0)
-    match = _LEADING_DATE.match(rel.stem)
-    return match.group(1) if match else today.isoformat()
+                return match.group(0), rest
+    if leading:
+        return leading.group(1), rest
+    compact = _compact_date(stem)
+    if compact:
+        day = f"{compact.group(1)}-{compact.group(2)}-{compact.group(3)}"
+        return day, stem[: compact.start()] + " " + stem[compact.end() :]
+    return today.isoformat(), stem
 
 
 def _summary_page(rel: PurePosixPath, data: bytes, today: date, taken: set[str], brain: Path) -> str:
-    day = _summary_date(rel, data, today)
-    slug = kebab(_LEADING_DATE.sub("", rel.stem, count=1)) or "note"
+    day, stem = _summary_date(rel, data, today)
+    slug = kebab(stem) or "note"
     base = f"{SOURCES}/{day}-{slug}"
     page, n = f"{base}.md", 1
     while page in taken or (brain / page).exists():
@@ -208,7 +231,7 @@ def _attachments(
     brain_rel: PurePosixPath | None,
     ignored: set[PurePosixPath],
 ) -> set[PurePosixPath]:
-    """Non-note files embedded by `notes`, excluding git-ignored files and anything under the brain."""
+    """Non-note files embedded by `notes`, excluding git-ignored files and anything under a brain."""
     resolver = Resolver(vault.files, vault.settings.new_file_folder)
     found: set[PurePosixPath] = set()
     for rel in notes:
@@ -226,6 +249,7 @@ def _attachments(
                 or path.suffix.lower() == ".md"
                 or _covered(path, ignored)
                 or (brain_rel is not None and _within(path, brain_rel))
+                or _in_a_brain(path, root)
                 or not (root / path).is_file()
             ):
                 continue
@@ -246,7 +270,8 @@ def _validate(source: Path, name: str | None) -> tuple[Path, str]:
         raise ValueError(f"{source}: a single-note source must be a .md file")
     root = source_root(source).resolve()
     name = kebab(root.name) if name is None else name
-    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+    # `:` separates the name from the path in ledger origins (`<name>:<path>`)
+    if not name or name in {".", ".."} or any(c in name for c in "/\\:"):
         raise ValueError(f"invalid source name {name!r}")
     return root, name
 

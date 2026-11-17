@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import subprocess
 import sys
 from datetime import date
 from pathlib import Path, PurePosixPath
@@ -69,13 +68,16 @@ def _load_types(path: Path) -> TypeConfig:
 
 
 def _require_repo(vault: Path) -> None:
-    if not gitutil.is_repo(vault):
-        raise _Exit(2, f"error: {vault} is not the top level of a git repository")
-    gitutil.ensure_info_exclude(vault)
+    location = gitutil.repo_location(vault)
+    if location is None:
+        raise _Exit(2, f"error: {vault} is not inside a git repository")
+    top, prefix = location
+    entry = ".okf-migrate/" if prefix == PurePosixPath(".") else f"{prefix}/.okf-migrate/"
+    gitutil.ensure_info_exclude(top, entry)
 
 
 def _require_clean(vault: Path) -> None:
-    dirty = gitutil.dirty_paths(vault)
+    dirty = gitutil.dirty_under(vault)
     if dirty:
         lines = "\n".join(f"  {p}" for p in dirty)
         raise _Exit(2, f"error: uncommitted changes (commit or stash them first):\n{lines}")
@@ -83,14 +85,11 @@ def _require_clean(vault: Path) -> None:
 
 def _ignored(vault: Path) -> list[PurePosixPath]:
     """Git-ignored paths: `git restore` cannot undo changes there, so they stay outside the bundle."""
-    return gitutil.ignored_paths(vault) if gitutil.is_repo(vault) else []
+    return gitutil.ignored_under(vault)
 
 
 def _timestamps(vault: Path) -> dict:
-    try:
-        return gitutil.last_commit_times(vault)
-    except subprocess.CalledProcessError:
-        return {}  # no commits yet; the planner falls back to file mtimes
+    return gitutil.commit_times_under(vault)  # {} without commits: the planner falls back to file mtimes
 
 
 def _scan(args: argparse.Namespace) -> int:
@@ -183,7 +182,8 @@ HANDLERS = {"scan": _scan, "plan": _plan, "apply": _apply, "validate": _validate
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    args.vault = args.vault.resolve()  # `.` would otherwise give an empty root index title
+    # absolute (`.` would otherwise give an empty root index title), in on-disk letter case for git paths
+    args.vault = gitutil.canonical(args.vault)
     if not args.vault.is_dir():
         print(f"error: vault is not a directory: {args.vault}", file=sys.stderr)
         return 2
