@@ -85,8 +85,16 @@ class _Info:
 
 
 class _Planner:
-    def __init__(self, vault: Vault, cfg: TypeConfig, timestamps: Mapping[PurePosixPath, str], today: date):
+    def __init__(
+        self,
+        vault: Vault,
+        cfg: TypeConfig,
+        timestamps: Mapping[PurePosixPath, str],
+        today: date,
+        root_log: bool = True,
+    ):
         self.vault = vault
+        self.root_log = root_log
         self.cfg = cfg
         self.timestamps = timestamps
         self.today = today
@@ -121,7 +129,7 @@ class _Planner:
         for log in self.logs:
             self._log(log)
         self._indexes()
-        if self.ops:
+        if self.ops and self.root_log:
             self._root_log()
         self.ops.sort(key=lambda op: (op.path, op.action != "rename"))
         self.plan.ops = self.ops
@@ -331,8 +339,14 @@ def _info(data: dict, stem: str) -> _Info:
     )
 
 
-def build_plan(vault: Vault, cfg: TypeConfig, timestamps: Mapping[PurePosixPath, str], today: date) -> Plan:
-    return _Planner(vault, cfg, timestamps, today).run()
+def build_plan(
+    vault: Vault,
+    cfg: TypeConfig,
+    timestamps: Mapping[PurePosixPath, str],
+    today: date,
+    root_log: bool = True,
+) -> Plan:
+    return _Planner(vault, cfg, timestamps, today, root_log).run()
 
 
 from okfmig.report import build_inventory, render_inventory_summary, render_plan_md  # noqa: E402

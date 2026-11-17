@@ -3,7 +3,7 @@ from pathlib import Path
 
 from okfmig.cli import main
 
-SCRIPT = Path(__file__).resolve().parents[1] / "skills" / "okf-migrate" / "scripts" / "okf_migrate.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "okf_migrate.py"
 
 
 def test_help_lists_subcommands():

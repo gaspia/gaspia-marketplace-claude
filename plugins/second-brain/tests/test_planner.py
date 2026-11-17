@@ -29,9 +29,9 @@ def _stamps(files: dict[str, str]) -> dict[PurePosixPath, str]:
     return {PurePosixPath(p): STAMP for p in files}
 
 
-def _plan(root: Path, cfg: TypeConfig, files: dict[str, str] | None = None) -> Plan:
+def _plan(root: Path, cfg: TypeConfig, files: dict[str, str] | None = None, **kwargs: bool) -> Plan:
     vault = discover(root, cfg.exclude)
-    return build_plan(vault, cfg, _stamps(files or {}), TODAY)
+    return build_plan(vault, cfg, _stamps(files or {}), TODAY, **kwargs)
 
 
 def _apply(root: Path, plan: Plan) -> None:
@@ -85,6 +85,16 @@ def test_raw_vault_plan(make_vault: Callable) -> None:
         "dates_unlinked": 1,
     }
     assert plan.types_assigned["a.md"] == {"type": "note", "reason": "default"}
+
+
+def test_root_log_switch_off(make_vault: Callable) -> None:
+    root = make_vault(RAW)
+    with_log = _ops(_plan(root, TypeConfig(default="note"), RAW))
+    without = _ops(_plan(root, TypeConfig(default="note"), RAW, root_log=False))
+
+    assert "log.md" in with_log
+    assert "log.md" not in without
+    assert sorted(without) == sorted(set(with_log) - {"log.md"})
 
 
 def test_unclassified_blocks(make_vault: Callable) -> None:

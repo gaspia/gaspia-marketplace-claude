@@ -96,3 +96,9 @@ def test_ignored_paths_are_excluded_but_still_files(make_vault: MakeVault) -> No
 def test_new_file_folder_is_normalized(make_vault: MakeVault, raw: str, expected: str) -> None:
     app = json.dumps({"newFileLocation": "folder", "newFileFolderPath": raw})
     assert discover(make_vault({".obsidian/app.json": app})).settings.new_file_folder == PurePosixPath(expected)
+
+
+def test_ingest_workdir_is_always_excluded(make_vault: MakeVault) -> None:
+    vault = discover(make_vault({".okf-ingest/previous/raw/s/a.md": "a", "n.md": "n"}))
+    assert [n.path for n in vault.notes] == p("n.md")
+    assert PurePosixPath(".okf-ingest/previous/raw/s/a.md") not in vault.files

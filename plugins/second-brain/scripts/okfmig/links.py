@@ -281,6 +281,24 @@ def outside_links(body: str, source: PurePosixPath) -> list[str]:
     return [rel for rel in _local_links(body) if _vault_path(source, rel) is None]
 
 
+def embed_targets(text: str) -> list[tuple[Literal["wiki", "md"], str]]:
+    """Embeds outside code, in text order: `("wiki", target)` without `#heading`/`|alias`, or `("md", decoded
+    relative path)` for local markdown image embeds (URLs, absolute paths and anchors are skipped)."""
+    ranges = code_ranges(text)
+    found: list[tuple[int, Literal["wiki", "md"], str]] = []
+    for match in _WIKILINK.finditer(text):
+        if match.group(1) == "!" and not in_ranges(match.start(), ranges):
+            target = _split_wikilink(match.group(2))[0]
+            if target:
+                found.append((match.start(), "wiki", target))
+    for match in _MD_LINK.finditer(text):
+        if match.group("prefix").startswith("!") and not in_ranges(match.start(), ranges):
+            local = _local_target(match.group("target"))
+            if local is not None:
+                found.append((match.start(), "md", local[0]))
+    return [(kind, target) for _, kind, target in sorted(found)]
+
+
 def wikilinks_in(text: str) -> list[str]:
     ranges = code_ranges(text)
     return [m.group(0) for m in _WIKILINK.finditer(text) if not in_ranges(m.start(), ranges)]

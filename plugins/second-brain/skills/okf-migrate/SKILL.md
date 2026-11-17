@@ -10,7 +10,7 @@ A bundled script does the mechanical work (scan, plan, apply, validate). You do 
 Run every command as:
 
 ```bash
-uv run <this skill's base directory>/scripts/okf_migrate.py <subcommand> "<vault>"
+uv run <this skill's base directory>/../../scripts/okf_migrate.py <subcommand> "<vault>"
 ```
 
 The base directory is shown when this skill loads. Throwaway output goes to `<vault>/.okf-migrate/` (git-excluded). Persistent type rules live in `<vault>/.okf/types.yaml` and are committed with the vault.
