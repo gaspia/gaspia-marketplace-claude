@@ -270,7 +270,8 @@ def _validate(source: Path, name: str | None) -> tuple[Path, str]:
         raise ValueError(f"{source}: a single-note source must be a .md file")
     root = source_root(source).resolve()
     name = kebab(root.name) if name is None else name
-    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+    # `:` separates the name from the path in ledger origins (`<name>:<path>`)
+    if not name or name in {".", ".."} or any(c in name for c in "/\\:"):
         raise ValueError(f"invalid source name {name!r}")
     return root, name
 

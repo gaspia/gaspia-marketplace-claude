@@ -258,3 +258,13 @@ def test_mixed_case_brain_path_dirty_brain_exits_2(
     capsys.readouterr()
     assert main(["snapshot", str(vault / "SECOND-BRAIN"), str(vault / "onboarding.md"), "--today", TODAY]) == 2
     assert "  concepts/draft.md" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("name", ["work:notes", "a/b", ".."])
+def test_snapshot_bad_name_exits_2(
+    setup: tuple[Path, Path, Path], name: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, brain, vault = setup
+    assert main(["snapshot", str(brain), str(vault), "--name", name]) == 2
+    assert "invalid source name" in capsys.readouterr().err
+    assert not (brain / ".okf/sources.json").exists()
