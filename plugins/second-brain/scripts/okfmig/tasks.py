@@ -65,6 +65,28 @@ def task_id(origin: str, text: str) -> str:
     return hashlib.sha256(f"{origin}\n{normalize_text(text)}".encode()).hexdigest()[:8]
 
 
+def _build_task(tid: str, body: object) -> Task:
+    """A `Task` from its stored mapping; structure and field types only (`validate` reports the semantics)."""
+    if not isinstance(body, dict):
+        raise TypeError(f"{tid}: expected a mapping")
+    sources = body.get("sources")
+    if not isinstance(sources, list) or not all(isinstance(s, dict) for s in sources):
+        raise TypeError(f"{tid}: sources must be a list of mappings")
+    task = Task(id=tid, **{**body, "sources": [TaskSource(**s) for s in sources]})
+    required = {"text": task.text, "owner": task.owner, "status": task.status, "created": task.created}
+    required |= {"updated": task.updated}
+    optional = {"due": task.due, "page": task.page, "closed": task.closed}
+    lists = {"inferred": task.inferred, "manual": task.manual}
+    bad = [n for n, v in required.items() if not isinstance(v, str)]
+    bad += [n for n, v in optional.items() if v is not None and not isinstance(v, str)]
+    bad += [n for n, v in lists.items() if not isinstance(v, list) or not all(isinstance(i, str) for i in v)]
+    for source in task.sources:
+        bad += [f"sources.{n}" for n in ("origin", "raw_path", "quote") if not isinstance(getattr(source, n), str)]
+    if bad:
+        raise TypeError(f"{tid}: wrong type for {', '.join(sorted(set(bad)))}")
+    return task
+
+
 def load_store(brain: Path) -> TaskStore:
     path = brain / STORE
     data = _read_json(path, None)
@@ -73,10 +95,7 @@ def load_store(brain: Path) -> TaskStore:
     if not isinstance(data, dict) or not isinstance(data.get("tasks", {}), dict):
         raise ValueError(f"{path}: expected a mapping with a tasks mapping")
     try:
-        tasks = {
-            tid: Task(id=tid, **{**body, "sources": [TaskSource(**s) for s in body["sources"]]})
-            for tid, body in data.get("tasks", {}).items()
-        }
+        tasks = {tid: _build_task(tid, body) for tid, body in data.get("tasks", {}).items()}
     except (TypeError, KeyError, AttributeError) as exc:
         raise ValueError(f"{path}: invalid task: {exc}") from exc
     return TaskStore(tasks=tasks, last_today=data.get("last_today"), new_since=data.get("new_since"))

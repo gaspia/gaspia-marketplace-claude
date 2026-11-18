@@ -1,7 +1,9 @@
+import json
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
+import pytest
 from okfmig.brain import BrainSettings, init_brain
 from okfmig.brainvalidate import validate_brain
 from okfmig.ingest import complete_batch
@@ -219,3 +221,86 @@ def test_workdir_is_never_part_of_the_bundle(tmp_path: Path, make_vault: Callabl
     report = validate_brain(brain)
     assert report.errors == []
     assert _own_warnings(report.warnings) == []
+
+
+QUOTE = "We use embeddings for RAG."
+
+
+def _task(**changes: object) -> dict[str, object]:
+    body: dict[str, object] = {
+        "text": "Share the RAG notes",
+        "owner": "me",
+        "status": "open",
+        "due": "2026-11-20",
+        "sources": [{"origin": "vault:Onboarding.md", "raw_path": RAW, "quote": QUOTE}],
+        "page": None,
+        "inferred": [],
+        "manual": [],
+        "created": "2026-11-17",
+        "updated": "2026-11-17",
+        "closed": None,
+    }
+    return {**body, **changes}
+
+
+def _write_tasks(brain: Path, tasks: dict[str, dict[str, object]]) -> None:
+    _write(brain, {".okf/tasks.json": json.dumps({"tasks": tasks})})
+
+
+def _task_messages(items: list[str]) -> list[str]:
+    return [m for m in items if m.startswith("tasks.json")]
+
+
+def test_valid_tasks_clean(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _done_brain(tmp_path, make_vault)
+    _write_tasks(brain, {"aaaaaaaa": _task()})
+    report = validate_brain(brain)
+    assert _task_messages(report.errors) == []
+    assert _task_messages(report.warnings) == []
+
+
+def test_task_errors(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _done_brain(tmp_path, make_vault)
+    source = {"origin": "vault:Onboarding.md", "raw_path": RAW, "quote": QUOTE}
+    _write_tasks(
+        brain,
+        {
+            "00000001": _task(sources=[]),
+            "00000002": _task(sources=[{**source, "origin": "vault:Nope.md"}]),
+            "00000003": _task(sources=[{**source, "raw_path": "raw/vault/missing.md"}]),
+            "00000004": _task(owner="people/nobody.md"),
+            "00000005": _task(page="projects/gone.md"),
+            "00000006": _task(due="Friday"),
+            "XYZ": _task(),
+            "00000008": _task(status="later"),
+            "00000009": _task(closed="2026-11-18"),
+        },
+    )
+    errors = _task_messages(validate_brain(brain).errors)
+    assert len(errors) == 9
+    for tid in ("00000001", "00000002", "00000003", "00000004", "00000005", "00000006", "XYZ", "00000008", "00000009"):
+        assert sum(e.startswith(f"tasks.json: {tid}:") for e in errors) == 1
+
+
+def test_task_closed_missing_on_done(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _done_brain(tmp_path, make_vault)
+    _write_tasks(brain, {"aaaaaaaa": _task(status="done")})
+    assert len(_task_messages(validate_brain(brain).errors)) == 1
+
+
+def test_task_quote_gone_warns(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _done_brain(tmp_path, make_vault)
+    gone = [{"origin": "vault:Onboarding.md", "raw_path": RAW, "quote": "Never written."}]
+    _write_tasks(brain, {"aaaaaaaa": _task(sources=gone)})
+    report = validate_brain(brain)
+    assert _task_messages(report.errors) == []
+    assert len(_task_messages(report.warnings)) == 1
+    _write_tasks(brain, {"aaaaaaaa": _task(sources=gone, status="done", closed="2026-11-18")})
+    assert _task_messages(validate_brain(brain).warnings) == []
+
+
+def test_unreadable_task_store_raises(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _done_brain(tmp_path, make_vault)
+    _write(brain, {".okf/tasks.json": "[1]"})
+    with pytest.raises(ValueError, match=r"tasks\.json"):
+        validate_brain(brain)
