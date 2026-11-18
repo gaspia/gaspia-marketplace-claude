@@ -17,6 +17,8 @@ Its second skill, `ingest`, distills notes from any Obsidian vault, folder or si
 
 Its third skill, `concept`, creates or enriches one concept page, also as the command `/second-brain:new-concept <name>`. It checks for duplicates with `similar`, gathers what the brain already has, and searches outside sources (those set in the brain's `CLAUDE.md` under `## Concept sources`, other connected sources, the web, or any the user names) only when the brain lacks a cited definition or enough facts. It recommends which sources to ingest or skip, shows one review draft per `review.mode`, ingests approved sources through the `ingest` workflow, writes the concept with citations, and links it from the concepts index, related concepts and the projects and areas that mention it.
 
+`ingest` also extracts action items: commitments with a stated actor, from sources dated within `tasks.max_age_days` (default 30), limited to the user's own follow-ups (team backlog work stays in Jira). Each one cites a verbatim quote from its snapshot and lands in `<brain>/.okf/tasks.json`, a store only the script writes. `okf_brain.py today <brain>` lists overdue, due today, waiting on others, stale (`tasks.stale_days`, default 14) and new tasks; `task <brain> done|defer|delegate|drop <id>` changes one; `task-similar` finds likely duplicates; `validate` checks the store. Commands: `/second-brain:brain-init`, `/second-brain:brain-ingest <source>`, `/second-brain:brain-today` and `/second-brain:brain-task <action> <id>`. They read the brain path from the `SECOND_BRAIN` environment variable (set it under `env` in your Claude Code settings) and ask for it when unset.
+
 ## Development
 
 Add new plugins under `plugins/<name>/` and register them in `.claude-plugin/marketplace.json`.
