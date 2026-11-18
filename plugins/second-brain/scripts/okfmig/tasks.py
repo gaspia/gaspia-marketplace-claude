@@ -1,17 +1,20 @@
 """Action-item store: task records, ids, similarity and state transitions."""
 
 import hashlib
+import json
 import re
 from dataclasses import asdict, dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
+from okfmig.brain import WORKDIR, BrainSettings
 from okfmig.ingest import SIMILAR_RATIO
-from okfmig.snapshot import _read_json, _write_json
+from okfmig.snapshot import Batch, _read_json, _write_json
 
 STORE = PurePosixPath(".okf") / "tasks.json"
+BATCH_TASKS = PurePosixPath(WORKDIR) / "batches"
 
 Status = Literal["open", "waiting", "done", "dropped"]
 ACTIVE = ("open", "waiting")
@@ -143,3 +146,191 @@ def _mark_manual(task: Task, name: str) -> None:
         task.inferred.remove(name)
     if name not in task.manual:
         task.manual.append(name)
+
+
+def collapse_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+@dataclass
+class BatchTask:
+    origin: str
+    text: str
+    quote: str
+    owner: str | None = None
+    due: str | None = None
+    page: str | None = None
+    inferred: list[str] = field(default_factory=list)
+    same_as: str | None = None
+
+
+def batch_tasks_path(brain: Path, batch_id: str) -> Path:
+    return brain / BATCH_TASKS / batch_id / "tasks.json"
+
+
+def load_batch_tasks(brain: Path, batch_id: str) -> list[BatchTask]:
+    path = batch_tasks_path(brain, batch_id)
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise TaskError(f"{path}: cannot read: {exc}") from exc
+    if not isinstance(data, list):
+        raise TaskError(f"{path}: expected a list of tasks")
+    entries = []
+    for position, body in enumerate(data, start=1):
+        if not isinstance(body, dict):
+            raise TaskError(f"{path}: entry {position} is not an object")
+        try:
+            entries.append(BatchTask(**body))
+        except TypeError as exc:
+            raise TaskError(f"{path}: entry {position}: {exc}") from exc
+    return entries
+
+
+def _file_problem(brain: Path, rel: str, label: str) -> str | None:
+    path = PurePosixPath(rel)
+    if path.is_absolute() or ".." in path.parts:
+        return f"{label} must be a path inside the brain: {rel}"
+    if not (brain / rel).is_file():
+        return f"{label} does not exist: {rel}"
+    return None
+
+
+def _entry_problems(  # noqa: PLR0912, PLR0913, PLR0917
+    brain: Path, batch: Batch, entry: BatchTask, store: TaskStore, settings: BrainSettings, today: date
+) -> list[str]:
+    problems = []
+    item = next((i for i in batch.items if i.origin == entry.origin), None)
+    if item is None:
+        problems.append(f"origin is not in batch {batch.id}")
+    if not isinstance(entry.text, str) or not normalize_text(entry.text):
+        problems.append("text is empty")
+    if not isinstance(entry.quote, str) or not collapse_whitespace(entry.quote):
+        problems.append("quote is empty")
+    elif item is not None:
+        try:
+            snapshot = (brain / item.raw_path).read_text(encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            problems.append(f"cannot read snapshot {item.raw_path}: {exc}")
+        else:
+            if collapse_whitespace(entry.quote) not in collapse_whitespace(snapshot):
+                problems.append("quote is not in the snapshot")
+    if entry.due is not None:
+        try:
+            date.fromisoformat(entry.due)
+        except TypeError, ValueError:
+            problems.append(f"due is not an ISO date: {entry.due!r}")
+    if entry.owner is not None:
+        if not isinstance(entry.owner, str) or not entry.owner.strip():
+            problems.append("owner is empty")
+        elif entry.owner.startswith("people/"):
+            problem = _file_problem(brain, entry.owner, "owner page")
+            if problem:
+                problems.append(problem)
+    if entry.page is not None:
+        problem = _file_problem(brain, entry.page, "page")
+        if problem:
+            problems.append(problem)
+    if not isinstance(entry.inferred, list) or not set(entry.inferred) <= set(FIELDS):
+        problems.append(f"inferred must be a subset of {list(FIELDS)}")
+    if entry.same_as is not None and entry.same_as not in store.tasks:
+        problems.append(f"same_as names no task: {entry.same_as}")
+    if item is not None:
+        problems.extend(_age_and_collision_problems(item.summary_page, entry, store, settings, today))
+    return problems
+
+
+def _age_and_collision_problems(
+    summary_page: str, entry: BatchTask, store: TaskStore, settings: BrainSettings, today: date
+) -> list[str]:
+    problems = []
+    try:
+        summary_date = date.fromisoformat(PurePosixPath(summary_page).name[:10])
+    except ValueError:
+        problems.append(f"summary page has no date prefix: {summary_page}")
+    else:
+        if summary_date < today - timedelta(days=settings.tasks_max_age_days):
+            problems.append(f"source is too old ({summary_date.isoformat()}, limit {settings.tasks_max_age_days} days)")
+    if entry.same_as is None and isinstance(entry.text, str):
+        existing = store.tasks.get(task_id(entry.origin, entry.text))
+        if existing is not None and all(source.origin != entry.origin for source in existing.sources):
+            problems.append(f"id collision with task {existing.id}")
+    return problems
+
+
+def check_batch_tasks(  # noqa: PLR0913, PLR0917
+    brain: Path, batch: Batch, entries: list[BatchTask], store: TaskStore, settings: BrainSettings, today: date
+) -> None:
+    """Refuse the whole file, listing every problem, one per line. Writes nothing."""
+    lines = []
+    for position, entry in enumerate(entries, start=1):
+        for problem in _entry_problems(brain, batch, entry, store, settings, today):
+            lines.append(f"#{position} {entry.origin}: {problem}")
+    if lines:
+        raise TaskError("\n".join(lines))
+
+
+def merge_batch_tasks(
+    store: TaskStore, batch: Batch, entries: list[BatchTask], settings: BrainSettings, today: date
+) -> dict[str, int]:
+    """Apply checked entries to `store` in file order; returns entries merged per origin."""
+    counts: dict[str, int] = {}
+    stamp = today.isoformat()
+    for entry in entries:
+        item = next(i for i in batch.items if i.origin == entry.origin)
+        inferred = list(entry.inferred)
+        owner = entry.owner
+        if owner is None:
+            owner = settings.tasks_default_owner
+            inferred.append("owner")
+        quote = collapse_whitespace(entry.quote)
+        tid = entry.same_as or task_id(entry.origin, entry.text)
+        task = store.tasks.get(tid)
+        if task is None:
+            store.tasks[tid] = Task(
+                id=tid,
+                text=entry.text,
+                owner=owner,
+                status="open" if owner == "me" else "waiting",
+                due=entry.due,
+                sources=[TaskSource(entry.origin, item.raw_path, quote)],
+                page=entry.page,
+                inferred=[name for name in FIELDS if name in inferred],
+                manual=[],
+                created=stamp,
+                updated=stamp,
+                closed=None,
+            )
+        else:
+            _merge_existing(task, entry, item.raw_path, quote, owner, inferred, stamp)
+        counts[entry.origin] = counts.get(entry.origin, 0) + 1
+    return counts
+
+
+def _merge_existing(  # noqa: PLR0913, PLR0917
+    task: Task, entry: BatchTask, raw_path: str, quote: str, owner: str, inferred: list[str], stamp: str
+) -> None:
+    before = asdict(task)
+    task.text = entry.text
+    if entry.page is not None:
+        task.page = entry.page
+    source = next((s for s in task.sources if s.origin == entry.origin), None)
+    if source is None:
+        task.sources.append(TaskSource(entry.origin, raw_path, quote))
+    else:
+        source.raw_path = raw_path
+        source.quote = quote
+    for name, value in (("owner", owner), ("due", entry.due)):
+        if name in task.manual:
+            continue
+        setattr(task, name, value)
+        if name in inferred and name not in task.inferred:
+            task.inferred.append(name)
+        elif name not in inferred and name in task.inferred:
+            task.inferred.remove(name)
+    if task.status in ACTIVE and "owner" not in task.manual:
+        task.status = "open" if task.owner == "me" else "waiting"
+    if asdict(task) != before:
+        task.updated = stamp

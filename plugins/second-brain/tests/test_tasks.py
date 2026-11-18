@@ -1,13 +1,23 @@
+import json
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
 import pytest
+from okfmig.brain import BrainSettings
+from okfmig.snapshot import Batch, BatchItem
 from okfmig.tasks import (
+    BatchTask,
     Task,
     TaskError,
     TaskSource,
     TaskStore,
+    batch_tasks_path,
+    check_batch_tasks,
+    collapse_whitespace,
+    load_batch_tasks,
     load_store,
+    merge_batch_tasks,
     normalize_text,
     save_store,
     similar_tasks,
@@ -149,3 +159,162 @@ def test_transition_unknown_or_closed_refused():
         transition(Path("."), store, "nope", "done", TODAY)
     with pytest.raises(TaskError):
         transition(Path("."), store, "dddddddd", "done", TODAY)
+
+
+SNAPSHOT = "Paulo to write up the routing\ndecision by Friday.\nAna to send the deck."
+ORIGIN = "vault:Sync.md"
+SETTINGS = BrainSettings()
+
+
+def _brain(tmp_path: Path) -> Path:
+    raw = tmp_path / "raw" / "vault" / "Sync.md"
+    raw.parent.mkdir(parents=True)
+    raw.write_text(SNAPSHOT, encoding="utf-8")
+    return tmp_path
+
+
+def _batch(summary: str = "sources/2026-11-17-sync.md", origin: str = ORIGIN) -> Batch:
+    return Batch("b001", [BatchItem(origin, "raw/vault/Sync.md", "new", None, summary)])
+
+
+def _entry(**overrides) -> BatchTask:
+    fields = {"origin": ORIGIN, "text": "Write up the routing decision", "quote": "write up the routing decision"}
+    fields.update(overrides)
+    return BatchTask(**fields)
+
+
+def test_collapse_whitespace():
+    assert collapse_whitespace("  a \n\t b  ") == "a b"
+
+
+def test_check_quote_matches_across_line_breaks(tmp_path: Path):
+    brain = _brain(tmp_path)
+    entry = _entry(quote="write up the routing decision by Friday")
+    check_batch_tasks(brain, _batch(), [entry], TaskStore(), SETTINGS, TODAY)
+
+
+def test_check_refusals(tmp_path: Path):
+    brain = _brain(tmp_path)
+    entries = [
+        _entry(origin="vault:Other.md"),
+        _entry(quote="never said"),
+        _entry(due="Friday"),
+        _entry(owner="people/nobody.md"),
+        _entry(inferred=["status"]),
+        _entry(same_as="deadbeef"),
+    ]
+    with pytest.raises(TaskError) as exc:
+        check_batch_tasks(brain, _batch(), entries, TaskStore(), SETTINGS, TODAY)
+    lines = str(exc.value).splitlines()
+    assert len(lines) == 6
+    for index, line in enumerate(lines, start=1):
+        assert f"#{index}" in line
+
+
+def test_check_refuses_path_escapes(tmp_path: Path):
+    brain = _brain(tmp_path)
+    (tmp_path.parent / "outside.md").write_text("x", encoding="utf-8")
+    entries = [_entry(page="../outside.md"), _entry(page=str(tmp_path / "raw" / "vault" / "Sync.md"))]
+    with pytest.raises(TaskError) as exc:
+        check_batch_tasks(brain, _batch(), entries, TaskStore(), SETTINGS, TODAY)
+    assert len(str(exc.value).splitlines()) == 2
+
+
+def test_check_too_old(tmp_path: Path):
+    brain = _brain(tmp_path)
+    batch = _batch("sources/2026-09-01-sync.md")
+    with pytest.raises(TaskError, match="too old"):
+        check_batch_tasks(brain, batch, [_entry()], TaskStore(), SETTINGS, TODAY)
+    check_batch_tasks(brain, batch, [_entry()], TaskStore(), replace(SETTINGS, tasks_max_age_days=90), TODAY)
+
+
+def test_check_id_collision(tmp_path: Path):
+    brain = _brain(tmp_path)
+    tid = task_id(ORIGIN, "Write up the routing decision")
+    other = _task(id=tid, sources=[TaskSource("vault:Else.md", "raw/e.md", "q")])
+    with pytest.raises(TaskError, match="id collision"):
+        check_batch_tasks(brain, _batch(), [_entry()], _store(other), SETTINGS, TODAY)
+    same = _task(id=tid, sources=[TaskSource(ORIGIN, "raw/vault/Sync.md", "q")])
+    check_batch_tasks(brain, _batch(), [_entry()], _store(same), SETTINGS, TODAY)
+
+
+def test_merge_new_tasks():
+    store = TaskStore()
+    entries = [
+        _entry(owner="me", due="2026-11-21", inferred=["due"]),
+        _entry(text="Send the deck", quote="send the deck", owner="Ana"),
+    ]
+    counts = merge_batch_tasks(store, _batch(), entries, SETTINGS, TODAY)
+    assert counts == {ORIGIN: 2}
+    first = store.tasks[task_id(ORIGIN, "Write up the routing decision")]
+    second = store.tasks[task_id(ORIGIN, "Send the deck")]
+    assert (first.status, second.status) == ("open", "waiting")
+    assert first.due == "2026-11-21" and first.inferred == ["due"]
+    assert first.created == first.updated == "2026-11-18" and first.closed is None
+    assert first.sources == [TaskSource(ORIGIN, "raw/vault/Sync.md", "write up the routing decision")]
+
+
+def test_merge_default_owner_inferred():
+    store = TaskStore()
+    merge_batch_tasks(store, _batch(), [_entry()], SETTINGS, TODAY)
+    task = next(iter(store.tasks.values()))
+    assert task.owner == "me" and "owner" in task.inferred
+
+
+def test_merge_is_idempotent():
+    store = TaskStore()
+    entries = [
+        _entry(due="2026-11-21", inferred=["due"]),
+        _entry(text="Send the deck", quote="send the deck", owner="Ana"),
+    ]
+    merge_batch_tasks(store, _batch(), entries, SETTINGS, TODAY)
+    before = json.dumps({k: vars(v) | {"sources": [vars(s) for s in v.sources]} for k, v in store.tasks.items()})
+    merge_batch_tasks(store, _batch(), entries, SETTINGS, date(2026, 11, 25))
+    after = json.dumps({k: vars(v) | {"sources": [vars(s) for s in v.sources]} for k, v in store.tasks.items()})
+    assert before == after
+
+
+def test_merge_same_as_rewording():
+    existing = _task(id="aaaaaaaa", text="Write up the routing decision")
+    store = _store(existing)
+    batch = Batch("b001", [BatchItem("vault:Two.md", "raw/vault/Two.md", "new", None, "sources/2026-11-17-two.md")])
+    entry = _entry(origin="vault:Two.md", text="Write up the Private Gateway routing decision", same_as="aaaaaaaa")
+    merge_batch_tasks(store, batch, [entry], SETTINGS, TODAY)
+    assert list(store.tasks) == ["aaaaaaaa"]
+    assert store.tasks["aaaaaaaa"].text == "Write up the Private Gateway routing decision"
+    assert [s.origin for s in store.tasks["aaaaaaaa"].sources] == ["v:a.md", "vault:Two.md"]
+
+
+def test_merge_respects_manual():
+    tid = task_id(ORIGIN, "Write up the routing decision")
+    existing = _task(id=tid, due="2026-12-01", manual=["due"], sources=[TaskSource(ORIGIN, "old", "old")])
+    store = _store(existing)
+    merge_batch_tasks(store, _batch(), [_entry(due="2026-11-21")], SETTINGS, TODAY)
+    assert store.tasks[tid].due == "2026-12-01"
+    assert store.tasks[tid].sources == [TaskSource(ORIGIN, "raw/vault/Sync.md", "write up the routing decision")]
+
+
+def test_merge_keeps_closed_task_closed():
+    tid = task_id(ORIGIN, "Write up the routing decision")
+    existing = _task(id=tid, status="done", closed="2026-11-10", sources=[TaskSource(ORIGIN, "r", "q")])
+    store = _store(existing)
+    merge_batch_tasks(store, _batch(), [_entry(owner="Ana")], SETTINGS, TODAY)
+    assert store.tasks[tid].status == "done" and store.tasks[tid].closed == "2026-11-10"
+
+
+def test_load_batch_tasks_missing_and_bad(tmp_path: Path):
+    assert load_batch_tasks(tmp_path, "b001") == []
+    path = batch_tasks_path(tmp_path, "b001")
+    assert path == tmp_path / ".okf-ingest" / "batches" / "b001" / "tasks.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"text": 1}), encoding="utf-8")
+    with pytest.raises(TaskError):
+        load_batch_tasks(tmp_path, "b001")
+    path.write_text(json.dumps([{"origin": "o", "text": "t", "quote": "q", "priority": 1}]), encoding="utf-8")
+    with pytest.raises(TaskError):
+        load_batch_tasks(tmp_path, "b001")
+    path.write_text(json.dumps([{"origin": "o", "text": "t"}]), encoding="utf-8")
+    with pytest.raises(TaskError):
+        load_batch_tasks(tmp_path, "b001")
+    path.write_text(json.dumps([{"origin": "o", "text": "t", "quote": "q"}]), encoding="utf-8")
+    assert load_batch_tasks(tmp_path, "b001") == [BatchTask("o", "t", "q")]
