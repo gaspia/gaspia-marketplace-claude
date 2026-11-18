@@ -64,8 +64,9 @@ Meetings, 1:1s and training notes are sources, not wiki pages. Their content flo
 ## Ingest workflow
 
 1. `snapshot`: copy new and changed sources into `raw/<source-name>/`, update the ledger, write the batches.
-2. `next`: print the next batch. Read `index.md`, each snapshot (or its diff against the previous snapshot) and the
-   pages it may touch. Run `similar` before proposing any new page and `task-similar` before proposing any task.
+2. `next`: print the next batch. Read `index.md` if it exists, each snapshot (or its diff against the previous snapshot) and the
+   pages it may touch. Run `similar` before proposing any new page and `task-similar` before proposing any task;
+   also compare by meaning against every open and waiting task in `.okf/tasks.json`.
 3. Review: draft the takeaways, the pages to create or update, possible duplicates and inferred items, and the
    actions extracted, then get approval per `review.mode`. Write nothing in `source` or `batch` mode before the review
    is approved.

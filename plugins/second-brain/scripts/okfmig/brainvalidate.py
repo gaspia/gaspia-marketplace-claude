@@ -147,6 +147,10 @@ def _brain_file(brain: Path, rel: str) -> bool:
     return path is not None and (brain / path).is_file()
 
 
+def _wiki_path(rel: str) -> bool:
+    return PurePosixPath(rel).parts[0] in WIKI_FOLDERS
+
+
 def _task_problems(brain: Path, ledger: dict[str, LedgerEntry], tid: str, task: Task) -> list[str]:
     problems = []
     if not _TASK_ID.match(tid):
@@ -154,7 +158,7 @@ def _task_problems(brain: Path, ledger: dict[str, LedgerEntry], tid: str, task: 
     if task.status not in _STATUSES:
         problems.append(f"status {task.status!r} is not one of {', '.join(_STATUSES)}")
     elif task.status in ACTIVE and task.closed is not None:
-        problems.append(f"closed is set on an {task.status} task")
+        problems.append(f"closed is set on a task with status {task.status}")
     elif task.status not in ACTIVE and task.closed is None:
         problems.append(f"closed is missing on a {task.status} task")
     for name in ("due", "created", "updated", "closed"):
@@ -163,8 +167,8 @@ def _task_problems(brain: Path, ledger: dict[str, LedgerEntry], tid: str, task: 
             problems.append(f"{name} {value!r} is not an ISO date")
     if task.owner.startswith("people/") and not _brain_file(brain, task.owner):
         problems.append(f"owner {task.owner} is not an existing file")
-    if task.page is not None and not _brain_file(brain, task.page):
-        problems.append(f"page {task.page} is not an existing file")
+    if task.page is not None and not (_brain_file(brain, task.page) and _wiki_path(task.page)):
+        problems.append(f"page {task.page} is not an existing wiki page")
     if not task.sources:
         problems.append("has no sources")
     for source in task.sources:

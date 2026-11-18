@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import re
 import shutil
 from dataclasses import asdict, dataclass
@@ -67,7 +68,13 @@ class SnapshotResult:
 def _write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
-    path.write_bytes(text.encode("utf-8"))
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_bytes(text.encode("utf-8"))
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _read_json(path: Path, default: Any) -> Any:

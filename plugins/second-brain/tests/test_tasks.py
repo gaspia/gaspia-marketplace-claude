@@ -223,6 +223,17 @@ def test_check_refuses_path_escapes(tmp_path: Path):
     assert len(str(exc.value).splitlines()) == 2
 
 
+def test_check_page_must_be_wiki_page(tmp_path: Path):
+    brain = _brain(tmp_path)
+    (brain / "CLAUDE.md").write_text("x", encoding="utf-8")
+    (brain / "projects").mkdir()
+    (brain / "projects" / "gateway.md").write_text("x", encoding="utf-8")
+    for bad in ("raw/vault/Sync.md", "CLAUDE.md"):
+        with pytest.raises(TaskError, match="page must be a wiki page"):
+            check_batch_tasks(brain, _batch(), [_entry(page=bad)], TaskStore(), SETTINGS, TODAY)
+    check_batch_tasks(brain, _batch(), [_entry(page="projects/gateway.md")], TaskStore(), SETTINGS, TODAY)
+
+
 def test_check_too_old(tmp_path: Path):
     brain = _brain(tmp_path)
     batch = _batch("sources/2026-09-01-sync.md")

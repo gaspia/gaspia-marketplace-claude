@@ -9,7 +9,7 @@ from difflib import SequenceMatcher
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-from okfmig.brain import BrainSettings
+from okfmig.brain import WIKI_FOLDERS, BrainSettings
 from okfmig.snapshot import BATCH_WORK, Batch, _read_json, _write_json
 
 SIMILAR_RATIO = 0.75
@@ -303,6 +303,8 @@ def _entry_problems(  # noqa: PLR0912, PLR0913, PLR0917
         problem = _file_problem(brain, entry.page, "page")
         if problem:
             problems.append(problem)
+        elif PurePosixPath(entry.page).parts[0] not in WIKI_FOLDERS:
+            problems.append(f"page must be a wiki page ({', '.join(WIKI_FOLDERS)}): {entry.page}")
     if not set(entry.inferred) <= set(FIELDS):
         problems.append(f"inferred must be a subset of {list(FIELDS)}")
     if entry.same_as is not None and entry.same_as not in store.tasks:

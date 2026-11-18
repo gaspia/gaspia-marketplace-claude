@@ -153,6 +153,8 @@ def test_schema_template_mirrors_page_types() -> None:
         "When a page earns its place",
         "never placeholder text",
         "`# Citations`",
+        "Read `index.md` if it exists",
+        "every open and waiting task in `.okf/tasks.json`",
     ):
         assert rule in text, rule
     assert "—" not in text

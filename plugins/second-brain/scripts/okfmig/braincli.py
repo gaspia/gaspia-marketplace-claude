@@ -62,7 +62,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parsers["task-similar"].add_argument("text", help="text of the task you are about to add")
     for name in ("snapshot", "done", "today", "task"):
         parsers[name].add_argument(
-            "--today", type=date.fromisoformat, default=None, help="date to record, YYYY-MM-DD (default: today)"
+            "--today", type=date.fromisoformat, default=None, help="as-of date, YYYY-MM-DD (default: today)"
         )
     return parser
 

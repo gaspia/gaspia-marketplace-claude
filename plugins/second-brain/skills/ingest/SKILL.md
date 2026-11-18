@@ -13,7 +13,7 @@ Run every command as:
 uv run <this skill's base directory>/../../scripts/okf_brain.py <subcommand> "<brain>" ...
 ```
 
-Subcommands: `init <brain>`, `snapshot <brain> <source> [--name NAME]`, `next <brain>`, `similar <brain> "<title>"`, `done <brain> <batch-id>`, `validate <brain>`, `today <brain>`, `task <brain> done|defer|delegate|drop <id> [--to PERSON] [--until YYYY-MM-DD]`, `task-similar <brain> "<text>"`. Exit codes: 0 ok, 1 refused or validation errors, 2 usage or preflight error. The workdir `<brain>/.okf-ingest/` is git-excluded.
+Subcommands: `init <brain>`, `snapshot <brain> <source> [--name NAME] [--today YYYY-MM-DD]`, `next <brain>`, `similar <brain> "<title>"`, `done <brain> <batch-id> [--today YYYY-MM-DD]`, `validate <brain>`, `today <brain> [--today YYYY-MM-DD]`, `task <brain> done|defer|delegate|drop <id> [--to PERSON] [--until YYYY-MM-DD] [--today YYYY-MM-DD]`, `task-similar <brain> "<text>"`. Exit codes: 0 ok, 1 refused or validation errors, 2 usage or preflight error. The workdir `<brain>/.okf-ingest/` is git-excluded.
 
 ## Hard rules
 
@@ -22,7 +22,7 @@ Subcommands: `init <brain>`, `snapshot <brain> <source> [--name NAME]`, `next <b
 - Never invent facts. Every claim cites a source; inferred sentences end with `(inferred)` and the page gets `status: inferred`.
 - Edit existing pages in place; never regenerate one. Keep text the user wrote by hand.
 - Run `similar` before proposing any new page. Every hit is a duplicate question for the user, in every mode, autonomous included.
-- Run `task-similar` before proposing any task; every hit is a duplicate question, in every mode. It only catches near-identical wording, so also compare by meaning with the open and waiting tasks in `.okf/tasks.json` (read-only) for the people and pages the source touches; a likely match is a duplicate question too.
+- Run `task-similar` before proposing any task; every hit is a duplicate question, in every mode. It only catches near-identical wording, so also compare by meaning with every open and waiting task in `.okf/tasks.json` (read-only); a likely match is a duplicate question too.
 - Never edit `.okf/tasks.json`; tasks reach it only through the batch `tasks.json` and `done`.
 - No `## Personal` or `## Performance` content while its setting is off.
 - Never commit. Suggest one commit per batch.
@@ -30,6 +30,7 @@ Subcommands: `init <brain>`, `snapshot <brain> <source> [--name NAME]`, `next <b
 ## Workflow
 
 1. **Preflight.** Ask for the brain path and the source (a vault, a folder or one `.md` note). The brain must be a git repo or inside one.
+   - After a plugin update, run `init` once on an existing brain so its `CLAUDE.md` schema section picks up new rules. `init` is idempotent.
    - No `.okf/brain.yaml`: run `init`. It is idempotent and writes the folders, settings, type rules and the schema section in `CLAUDE.md`.
    - `init` warns when the brain sits inside another Obsidian vault. Tell the user to add the printed glob (`<brain-folder>/**`) to that vault's `.okf/types.yaml` `exclude`, or to move the brain into its own vault. Otherwise snapshots show twice in Obsidian and `okf-migrate` on the outer vault would add frontmatter to them.
    - First run on an existing brain folder that already holds notes (for example a `second-brain/` with a `concepts/` folder and a pre-OKF `index.md` / `log.md`): `init`, then run the `okf-migrate` skill on the brain so its notes, index and log become OKF, have the user commit, then ingest.

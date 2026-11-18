@@ -27,7 +27,7 @@ Read this before extracting any action item. Tasks are the user's follow-ups, ke
 - **`origin`**: the source's `origin` exactly as `next` prints it. It must be in the batch.
 - **`text`**: the task as a short imperative ("Write up the routing decision"), without the owner or the date.
 - **`quote`**: the citation. A short verbatim span of the snapshot that states the commitment, copied from the file under `raw/`. Line breaks and runs of spaces may differ; every other character must match, case included. A task with no quote, or one that is not in the snapshot, is refused.
-- **`owner`**: `me` for the user; a `people/<slug>.md` path (from the brain root) when that person page exists; else the bare name ("Ana") with `owner` in `inferred`. `null` when the source states no actor (see above).
+- **`owner`**: `me` for the user; a `people/<slug>.md` path (from the brain root) when that person page exists (or you write it in this batch); else the bare name ("Ana") with `owner` in `inferred`. `null` when the source states no actor (see above).
 - **`due`**: an ISO date (`2026-11-20`), only when the source states one. A relative date ("by Friday") resolves against the source's date, not today, and puts `due` in `inferred`. A date tied to an event rather than the calendar ("before they start", "before the next sync") is `null`: keep the event in `text` ("Draft the onboarding checklist before the new hires start"). No stated date: `null`.
 - **`page`**: the project or area page the task belongs to (`projects/<slug>.md`, from the brain root), only when the source states which one and the page exists (or you write it in this batch). Else `null`.
 - **`inferred`**: the fields you resolved rather than copied: a subset of `["owner", "due"]`.
@@ -38,7 +38,7 @@ Read this before extracting any action item. Tasks are the user's follow-ups, ke
 
 - Run `task-similar <brain> "<text>"` before adding any task, in every review mode, autonomous included. It prints `<score>  <id>  <status>  <owner>  <text>` for each open or waiting task close to the text, or "no similar tasks".
 - Every hit is a duplicate question for the user, as `similar` is for pages.
-- `task-similar` only catches near-identical wording: "Draft the incident review process doc" does not find "Write up a proposal for how we run incident reviews". So also read the open and waiting tasks in `.okf/tasks.json` (read-only) for the people and pages this source touches, and compare them by meaning. A likely match is a duplicate question, even when `task-similar` prints nothing.
+- `task-similar` only catches near-identical wording: "Draft the incident review process doc" does not find "Write up a proposal for how we run incident reviews". So also read the open and waiting tasks in `.okf/tasks.json` (read-only), every one of them, and compare them by meaning with the draft. A likely match is a duplicate question, even when `task-similar` prints nothing.
 - "Same task" becomes an entry with `same_as: <id>`. "Different task" becomes a new entry with `same_as` null.
 - Also compare the tasks of this draft with each other. `same_as` can only name a task already in the store, so when one commitment appears in two sources of the same batch, write a single entry from the clearest source and name the other source in the review draft.
 
@@ -71,7 +71,7 @@ Write `.okf-ingest/batches/<batch-id>/tasks.json` before running `done`: a JSON 
 ]
 ```
 
-On a `same_as` or other update entry, `text` replaces the task's text: write the clearest current wording, as the second entry does.
+On a `same_as` or other update entry, `text` replaces the task's text: write the clearest current wording, as the second entry does. To keep the stored wording, copy the stored `text`.
 
 `done` refuses the whole file, writing nothing. A file it cannot load (not JSON, not a list, an entry that is not an object, a missing required key or an unknown key) is reported as `batch <id>: <path>: <problem>`, for an entry `batch <id>: <path>: entry <n>: <problem>`. Otherwise it lists every problem as `#<n> <origin>: <problem>` when an entry has: a value of the wrong type; an origin not in the batch; empty `text`; a `quote` that is empty or not in the snapshot; a snapshot it cannot read; a summary page with no date prefix; a `due` that is not an ISO date; an empty `owner`, or a `people/` owner with no such page; a `page` that is not an existing file inside the brain; `inferred` naming anything but `owner` and `due`; a `same_as` naming no task; a source older than `tasks.max_age_days`; or a computed id that belongs to a task from another source (use `same_as`). Fix the file and re-run `done`.
 

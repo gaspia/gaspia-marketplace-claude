@@ -282,6 +282,23 @@ def test_task_errors(tmp_path: Path, make_vault: Callable[[Files], Path]) -> Non
         assert sum(e.startswith(f"tasks.json: {tid}:") for e in errors) == 1
 
 
+def test_task_page_must_be_wiki_page(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _done_brain(tmp_path, make_vault)
+    (brain / "CLAUDE.md").write_text("x", encoding="utf-8")
+    _write_tasks(brain, {"00000001": _task(page=RAW), "00000002": _task(page="CLAUDE.md"), "00000003": _task()})
+    errors = _task_messages(validate_brain(brain).errors)
+    assert len(errors) == 2
+    assert all("is not an existing wiki page" in e for e in errors)
+
+
+def test_task_closed_on_waiting_message(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _done_brain(tmp_path, make_vault)
+    _write_tasks(brain, {"00000001": _task(status="waiting", closed="2026-11-18")})
+    assert _task_messages(validate_brain(brain).errors) == [
+        "tasks.json: 00000001: closed is set on a task with status waiting"
+    ]
+
+
 def test_task_closed_missing_on_done(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
     brain = _done_brain(tmp_path, make_vault)
     _write_tasks(brain, {"aaaaaaaa": _task(status="done")})

@@ -9,6 +9,7 @@ from okfmig.brain import BrainSettings, init_brain
 from okfmig.gitutil import ignored_under
 from okfmig.links import embed_targets
 from okfmig.snapshot import (
+    _write_json,
     load_batches,
     load_ledger,
     save_ledger,
@@ -30,6 +31,21 @@ def _brain(tmp_path: Path) -> Path:
 
 def _snapshot_files(brain: Path) -> set[str]:
     return {p.relative_to(brain).as_posix() for p in (brain / "raw").rglob("*") if p.is_file()}
+
+
+def test_write_json_failure_keeps_old_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "sub" / "store.json"
+    _write_json(target, {"a": 1})
+    old = target.read_bytes()
+
+    def boom(*args: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("okfmig.snapshot.os.replace", boom)
+    with pytest.raises(OSError):
+        _write_json(target, {"a": 2})
+    assert target.read_bytes() == old
+    assert list(target.parent.iterdir()) == [target]
 
 
 def test_first_snapshot_copies_bytes(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
