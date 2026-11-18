@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from okfmig.braincli import main
+from okfmig.tasks import Task, TaskSource, TaskStore, load_store, save_store
 
 Files = dict[str, str | bytes]
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "okf_brain.py"
@@ -268,3 +269,78 @@ def test_snapshot_bad_name_exits_2(
     assert main(["snapshot", str(brain), str(vault), "--name", name]) == 2
     assert "invalid source name" in capsys.readouterr().err
     assert not (brain / ".okf/sources.json").exists()
+
+
+def _task_store(brain: Path, *tasks: Task) -> None:
+    save_store(brain, TaskStore(tasks={t.id: t for t in tasks}))
+
+
+def _cli_task(**overrides) -> Task:
+    fields = {
+        "id": "aaaaaaaa",
+        "text": "Write the doc",
+        "owner": "me",
+        "status": "open",
+        "due": None,
+        "sources": [TaskSource(origin="vault:Onboarding.md", raw_path=RAW, quote="write the doc")],
+        "page": None,
+        "inferred": [],
+        "manual": [],
+        "created": "2026-11-17",
+        "updated": "2026-11-17",
+        "closed": None,
+    }
+    fields.update(overrides)
+    return Task(**fields)
+
+
+def test_today_prints_buckets(setup: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
+    _, brain, _ = setup
+    _task_store(
+        brain,
+        _cli_task(id="aaaaaaaa", due="2026-11-17"),
+        _cli_task(id="bbbbbbbb", status="waiting", owner="Ana", text="Send the report"),
+    )
+    capsys.readouterr()
+    assert main(["today", str(brain), "--today", "2026-11-18"]) == 0
+    out = capsys.readouterr().out
+    assert "Overdue (1)" in out
+    assert "Waiting on others (1)" in out
+    assert "aaaaaaaa  2026-11-17  me  Write the doc  (" in out
+    assert "bbbbbbbb  -  Ana  Send the report" in out
+    assert load_store(brain).last_today == "2026-11-18"
+
+
+def test_today_empty(setup: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
+    _, brain, _ = setup
+    capsys.readouterr()
+    assert main(["today", str(brain), "--today", "2026-11-18"]) == 0
+    assert "nothing due, waiting, stale or new" in capsys.readouterr().out
+    assert not (brain / ".okf" / "tasks.json").exists()
+
+
+def test_task_transitions_cli(setup: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
+    _, brain, _ = setup
+    _task_store(brain, _cli_task())
+    capsys.readouterr()
+    assert main(["task", str(brain), "done", "aaaaaaaa", "--today", "2026-11-18"]) == 0
+    assert "aaaaaaaa done: Write the doc" in capsys.readouterr().out
+    assert load_store(brain).tasks["aaaaaaaa"].status == "done"
+    assert main(["task", str(brain), "done", "aaaaaaaa"]) == 1
+    assert "refused" in capsys.readouterr().err
+    _task_store(brain, _cli_task())
+    assert main(["task", str(brain), "defer", "aaaaaaaa"]) == 2
+    assert main(["task", str(brain), "delegate", "aaaaaaaa"]) == 2
+    assert main(["task", str(brain), "done", "aaaaaaaa", "--to", "Ana"]) == 2
+    assert main(["task", str(brain), "done", "aaaaaaaa", "--until", "2026-12-01"]) == 2
+    assert main(["task", str(brain), "delegate", "aaaaaaaa", "--to", "Ana", "--until", "2026-12-01"]) == 2
+
+
+def test_task_similar_cli(setup: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
+    _, brain, _ = setup
+    _task_store(brain, _cli_task())
+    capsys.readouterr()
+    assert main(["task-similar", str(brain), "write the doc"]) == 0
+    assert "1.00  aaaaaaaa  open  me  Write the doc" in capsys.readouterr().out
+    assert main(["task-similar", str(brain), "completely unrelated zebra"]) == 0
+    assert "no similar tasks" in capsys.readouterr().out

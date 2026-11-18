@@ -19,6 +19,7 @@ BATCH_TASKS = BATCH_WORK
 Status = Literal["open", "waiting", "done", "dropped"]
 ACTIVE = ("open", "waiting")
 FIELDS = ("owner", "due")
+BUCKETS = ("overdue", "due today", "waiting on others", "stale", "new")
 
 
 class TaskError(Exception):
@@ -139,6 +140,40 @@ def transition(  # noqa: PLR0913
         _mark_manual(task, "owner")
     task.updated = stamp
     return task
+
+
+def today_buckets(store: TaskStore, today: date, stale_days: int) -> dict[str, list[Task]]:
+    """Group active tasks, each into the first bucket of `BUCKETS` it matches."""
+    stamp = today.isoformat()
+    stale_cutoff = (today - timedelta(days=stale_days)).isoformat()
+    buckets: dict[str, list[Task]] = {name: [] for name in BUCKETS}
+    for task in store.tasks.values():
+        if task.status not in ACTIVE:
+            continue
+        if task.status == "open" and task.due is not None and task.due < stamp:
+            buckets["overdue"].append(task)
+        elif task.status == "open" and task.due == stamp:
+            buckets["due today"].append(task)
+        elif task.status == "waiting":
+            buckets["waiting on others"].append(task)
+        elif task.updated <= stale_cutoff:
+            buckets["stale"].append(task)
+        elif store.new_since is None or task.created > store.new_since:
+            buckets["new"].append(task)
+    for name, tasks in buckets.items():
+        if name == "waiting on others":
+            tasks.sort(key=lambda t: (t.due is None, t.due or "", t.created, t.id))
+        else:
+            tasks.sort(key=lambda t: (t.due is None, t.due or "", t.id))
+    return buckets
+
+
+def mark_today_run(store: TaskStore, today: date) -> None:
+    """Remember this run so the next day's "new" bucket starts after it; a same-day rerun changes nothing."""
+    stamp = today.isoformat()
+    if store.last_today != stamp:
+        store.new_since = store.last_today
+        store.last_today = stamp
 
 
 def _mark_manual(task: Task, name: str) -> None:

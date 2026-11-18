@@ -7,6 +7,7 @@ import pytest
 from okfmig.brain import BrainSettings
 from okfmig.snapshot import Batch, BatchItem
 from okfmig.tasks import (
+    BUCKETS,
     BatchTask,
     Task,
     TaskError,
@@ -17,11 +18,13 @@ from okfmig.tasks import (
     collapse_whitespace,
     load_batch_tasks,
     load_store,
+    mark_today_run,
     merge_batch_tasks,
     normalize_text,
     save_store,
     similar_tasks,
     task_id,
+    today_buckets,
     transition,
 )
 
@@ -360,3 +363,49 @@ def test_check_refuses_wrongly_typed_values(tmp_path: Path):
     assert "inferred must be a list of strings" in lines[1]
     assert "same_as must be a string or null" in lines[2]
     assert "owner must be a string or null" in lines[3]
+
+
+def _ids(buckets: dict[str, list[Task]], name: str) -> list[str]:
+    return [t.id for t in buckets[name]]
+
+
+def test_buckets_due_today_boundary():
+    store = _store(_task(id="aaaaaaaa", due="2026-11-17"), _task(id="bbbbbbbb", due="2026-11-18"))
+    buckets = today_buckets(store, TODAY, 14)
+    assert list(buckets) == list(BUCKETS)
+    assert _ids(buckets, "overdue") == ["aaaaaaaa"]
+    assert _ids(buckets, "due today") == ["bbbbbbbb"]
+
+
+def test_buckets_stale_boundary():
+    store = _store(_task(id="aaaaaaaa", updated="2026-11-04"), _task(id="bbbbbbbb", updated="2026-11-05"))
+    buckets = today_buckets(store, TODAY, 14)
+    assert _ids(buckets, "stale") == ["aaaaaaaa"]
+
+
+def test_buckets_waiting_and_closed():
+    store = _store(
+        _task(id="aaaaaaaa", status="waiting", due="2026-11-17", updated="2026-01-01"),
+        _task(id="bbbbbbbb", status="done", due="2026-11-17"),
+        _task(id="cccccccc", status="dropped", due="2026-11-17"),
+    )
+    buckets = today_buckets(store, TODAY, 14)
+    assert _ids(buckets, "waiting on others") == ["aaaaaaaa"]
+    assert sum(len(v) for v in buckets.values()) == 1
+
+
+def test_buckets_new_since_last_run():
+    store = _store(
+        _task(id="aaaaaaaa", created="2026-11-16", updated="2026-11-17"),
+        _task(id="bbbbbbbb", created="2026-11-17", updated="2026-11-17"),
+    )
+    store.new_since = "2026-11-16"
+    assert _ids(today_buckets(store, TODAY, 14), "new") == ["bbbbbbbb"]
+    fresh = _store(_task(id="cccccccc", updated="2026-11-17"))
+    assert _ids(today_buckets(fresh, TODAY, 14), "new") == ["cccccccc"]
+    store.last_today = "2026-11-17"
+    store.new_since = "2026-11-10"
+    mark_today_run(store, TODAY)
+    assert (store.new_since, store.last_today) == ("2026-11-17", "2026-11-18")
+    mark_today_run(store, TODAY)
+    assert (store.new_since, store.last_today) == ("2026-11-17", "2026-11-18")
