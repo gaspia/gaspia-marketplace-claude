@@ -37,6 +37,31 @@ def test_settings_invalid(tmp_path: Path) -> None:
         load_settings(_settings(tmp_path / "c", "people:\n  personal: maybe\n"))
 
 
+def test_task_settings_defaults(tmp_path: Path) -> None:
+    s = load_settings(_settings(tmp_path / "a", "review:\n  mode: batch\n"))
+    assert (s.tasks_stale_days, s.tasks_default_owner, s.tasks_max_age_days) == (14, "me", 30)
+
+
+def test_task_settings_read(tmp_path: Path) -> None:
+    text = "tasks:\n  stale_days: 7\n  default_owner: people/ana.md\n  max_age_days: 90\n"
+    s = load_settings(_settings(tmp_path / "a", text))
+    assert (s.tasks_stale_days, s.tasks_default_owner, s.tasks_max_age_days) == (7, "people/ana.md", 90)
+
+
+@pytest.mark.parametrize("line", ["stale_days: 0", "max_age_days: true", 'default_owner: ""'])
+def test_task_settings_invalid(tmp_path: Path, line: str) -> None:
+    with pytest.raises(ValueError, match=r"tasks\."):
+        load_settings(_settings(tmp_path / "a", f"tasks:\n  {line}\n"))
+
+
+def test_init_writes_task_settings(tmp_path: Path) -> None:
+    root = tmp_path / "brain"
+    root.mkdir()
+    init_brain(root)
+    text = (root / ".okf" / "brain.yaml").read_text(encoding="utf-8")
+    assert "stale_days: 14" in text and "max_age_days: 30" in text
+
+
 def test_init_creates_layout(tmp_path: Path) -> None:
     root = tmp_path / "brain"
     root.mkdir()
@@ -128,6 +153,8 @@ def test_schema_template_mirrors_page_types() -> None:
         "When a page earns its place",
         "never placeholder text",
         "`# Citations`",
+        "Read `index.md` if it exists",
+        "every open and waiting task in `.okf/tasks.json`",
     ):
         assert rule in text, rule
     assert "—" not in text

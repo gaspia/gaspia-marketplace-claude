@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+import os
 import re
+import shutil
 from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath
@@ -18,6 +20,7 @@ from okfmig.vault import Vault, discover
 LEDGER = PurePosixPath(".okf") / "sources.json"
 BATCHES = PurePosixPath(WORKDIR) / "batches.json"
 PREVIOUS = PurePosixPath(WORKDIR) / "previous"
+BATCH_WORK = PurePosixPath(WORKDIR) / "batches"
 SOURCES = "sources"
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -65,7 +68,13 @@ class SnapshotResult:
 def _write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
-    path.write_bytes(text.encode("utf-8"))
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_bytes(text.encode("utf-8"))
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _read_json(path: Path, default: Any) -> Any:
@@ -341,6 +350,8 @@ def take_snapshot(brain: Path, source: Path, name: str | None, settings: BrainSe
 
     ledger = load_ledger(brain)
     batches = load_batches(brain)
+    if not batches:  # nothing pending: per-batch files left by an abandoned batch are stale
+        shutil.rmtree(brain / BATCH_WORK, ignore_errors=True)
     pending = {item.origin for b in batches for item in b.items}
     taken = {e.summary_page for e in ledger.values()}
     today_iso = today.isoformat()

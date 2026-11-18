@@ -33,6 +33,10 @@ review:
 people:
   personal: true     # family, interests, personal context
   performance: true  # feedback, self-assessments, growth areas
+tasks:
+  stale_days: 14     # no state change for this long shows in today's stale bucket
+  default_owner: me  # owner when a source states a commitment with no actor
+  max_age_days: 30   # sources older than this at ingest yield no tasks
 """
 
 _MODES = ("source", "batch", "autonomous")
@@ -44,6 +48,9 @@ class BrainSettings:
     batch_size: int = 10
     people_personal: bool = True
     people_performance: bool = True
+    tasks_stale_days: int = 14
+    tasks_default_owner: str = "me"
+    tasks_max_age_days: int = 30
 
     def effective_batch_size(self, single_note: bool) -> int:
         if single_note or self.review_mode == "source":
@@ -75,6 +82,7 @@ def load_settings(brain: Path) -> BrainSettings:
     defaults = BrainSettings()
     review = _section(raw, "review", path)
     people = _section(raw, "people", path)
+    tasks = _section(raw, "tasks", path)
     mode = review.get("mode", defaults.review_mode)
     if mode not in _MODES:
         raise ValueError(f"{path}: review.mode {mode!r} must be one of {', '.join(_MODES)}")
@@ -87,7 +95,18 @@ def load_settings(brain: Path) -> BrainSettings:
         if not isinstance(value, bool):
             raise ValueError(f"{path}: people.{key} {value!r} must be true or false")
         flags[key] = value
-    return BrainSettings(mode, size, flags["personal"], flags["performance"])
+    days: dict[str, int] = {}
+    for key, default in (("stale_days", defaults.tasks_stale_days), ("max_age_days", defaults.tasks_max_age_days)):
+        value = tasks.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(f"{path}: tasks.{key} {value!r} must be a positive integer")
+        days[key] = value
+    owner = tasks.get("default_owner", defaults.tasks_default_owner)
+    if not isinstance(owner, str) or not owner.strip():
+        raise ValueError(f"{path}: tasks.default_owner {owner!r} must be a non-empty string")
+    return BrainSettings(
+        mode, size, flags["personal"], flags["performance"], days["stale_days"], owner, days["max_age_days"]
+    )
 
 
 def outer_vault(brain: Path) -> Path | None:

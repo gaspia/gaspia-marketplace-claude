@@ -9,7 +9,18 @@ from okfmig import gitutil
 from okfmig.brain import init_brain, load_settings, outer_vault
 from okfmig.brainvalidate import validate_brain
 from okfmig.ingest import BatchError, complete_batch, similar_pages
-from okfmig.snapshot import load_batches, take_snapshot
+from okfmig.snapshot import load_batches, load_ledger, take_snapshot
+from okfmig.tasks import (
+    BUCKETS,
+    STORE,
+    TaskError,
+    load_store,
+    mark_today_run,
+    save_store,
+    similar_tasks,
+    today_buckets,
+    transition,
+)
 
 COMMANDS = {
     "init": "Create or update the brain layout, settings, type rules and schema",
@@ -18,6 +29,9 @@ COMMANDS = {
     "similar": "List existing wiki pages close to a title",
     "done": "Mark a batch ingested: normalize pages, update the ledger and log",
     "validate": "Validate the brain: OKF checks plus the brain rules",
+    "today": "Show tasks that are overdue, due today, waiting, stale or new",
+    "task": "Mark a task done, defer, delegate or drop it",
+    "task-similar": "List active tasks close to a text",
 }
 
 
@@ -39,9 +53,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parsers["snapshot"].add_argument("--name", help="source name (default: source folder name in kebab-case)")
     parsers["similar"].add_argument("title", help="title of the page you are about to create")
     parsers["done"].add_argument("batch_id", help="batch id, as printed by next")
-    for name in ("snapshot", "done"):
+    parsers["task"].add_argument("action", choices=("done", "defer", "delegate", "drop"), help="what to do")
+    parsers["task"].add_argument("id", help="task id, as printed by today")
+    parsers["task"].add_argument("--to", help="person to delegate to (delegate only)")
+    parsers["task"].add_argument(
+        "--until", type=date.fromisoformat, default=None, help="new due date, YYYY-MM-DD (defer only)"
+    )
+    parsers["task-similar"].add_argument("text", help="text of the task you are about to add")
+    for name in ("snapshot", "done", "today", "task"):
         parsers[name].add_argument(
-            "--today", type=date.fromisoformat, default=None, help="date to record, YYYY-MM-DD (default: today)"
+            "--today", type=date.fromisoformat, default=None, help="as-of date, YYYY-MM-DD (default: today)"
         )
     return parser
 
@@ -139,6 +160,61 @@ def _validate(args: argparse.Namespace) -> int:
     return 1 if report.errors else 0
 
 
+def _today_cmd(args: argparse.Namespace) -> int:
+    brain = args.brain
+    has_store = (brain / STORE).exists()
+    store = load_store(brain)
+    today = _today(args)
+    buckets = today_buckets(store, today, load_settings(brain).tasks_stale_days)
+    ledger = load_ledger(brain)
+    shown = False
+    for name in BUCKETS:
+        tasks = buckets[name]
+        if not tasks:
+            continue
+        shown = True
+        print(f"{name[0].upper()}{name[1:]} ({len(tasks)})")
+        for task in tasks:
+            origin = task.sources[0].origin if task.sources else None
+            entry = ledger.get(origin) if origin else None
+            page = entry.summary_page if entry else (task.sources[0].raw_path if task.sources else "-")
+            print(f"  {task.id}  {task.due or '-'}  {task.owner}  {task.text}  ({page})")
+    if not shown:
+        print("nothing due, waiting, stale or new")
+    if has_store:
+        mark_today_run(store, today)
+        save_store(brain, store)
+    return 0
+
+
+def _task(args: argparse.Namespace) -> int:
+    if args.to and args.action != "delegate":
+        raise _Exit(2, "error: --to is only for delegate")
+    if args.until and args.action != "defer":
+        raise _Exit(2, "error: --until is only for defer")
+    if args.action == "defer" and not args.until:
+        raise _Exit(2, "error: defer needs --until YYYY-MM-DD")
+    if args.action == "delegate" and not args.to:
+        raise _Exit(2, "error: delegate needs --to PERSON")
+    store = load_store(args.brain)
+    try:
+        task = transition(args.brain, store, args.id, args.action, _today(args), to=args.to, until=args.until)
+    except TaskError as exc:
+        raise _Exit(1, f"refused: {exc}") from exc
+    save_store(args.brain, store)
+    print(f"{task.id} {task.status}: {task.text}")
+    return 0
+
+
+def _task_similar(args: argparse.Namespace) -> int:
+    hits = similar_tasks(load_store(args.brain), args.text)
+    if not hits:
+        print("no similar tasks")
+    for task, score in hits:
+        print(f"{score:.2f}  {task.id}  {task.status}  {task.owner}  {task.text}")
+    return 0
+
+
 HANDLERS = {
     "init": _init,
     "snapshot": _snapshot,
@@ -146,6 +222,9 @@ HANDLERS = {
     "similar": _similar,
     "done": _done,
     "validate": _validate,
+    "today": _today_cmd,
+    "task": _task,
+    "task-similar": _task_similar,
 }
 
 

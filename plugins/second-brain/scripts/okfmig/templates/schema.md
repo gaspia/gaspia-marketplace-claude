@@ -51,16 +51,30 @@ Meetings, 1:1s and training notes are sources, not wiki pages. Their content flo
 - `people.personal`: write `## Personal` sections (family, interests, personal context) on person pages only when true.
 - `people.performance`: write `## Performance` sections (feedback, self-assessments, growth areas) only when true.
   Turning a setting off stops new content of that kind; it does not remove existing sections.
+- `tasks.stale_days`: an open task with no state change for this many days shows in today's stale bucket (default 14).
+- `tasks.default_owner`: owner when a source states a commitment with no actor (default `me`).
+- `tasks.max_age_days`: sources older than this at ingest yield no tasks (default 30).
+
+## Tasks
+
+- The store is `.okf/tasks.json`, written only by `okf_brain.py`.
+- Extraction follows `references/task-rules.md` of the ingest skill.
+- Never edit the store by hand.
 
 ## Ingest workflow
 
 1. `snapshot`: copy new and changed sources into `raw/<source-name>/`, update the ledger, write the batches.
-2. `next`: print the next batch. Read `index.md`, each snapshot (or its diff against the previous snapshot) and the
-   pages it may touch. Run `similar` before proposing any new page.
-3. Review: draft the takeaways, the pages to create or update, possible duplicates and inferred items, then get
-   approval per `review.mode`. Write nothing in `source` or `batch` mode before the review is approved.
+2. `next`: print the next batch. Read `index.md` if it exists, each snapshot (or its diff against the previous snapshot) and the
+   pages it may touch. Run `similar` before proposing any new page and `task-similar` before proposing any task;
+   also compare by meaning against every open and waiting task in `.okf/tasks.json`.
+3. Review: draft the takeaways, the pages to create or update, possible duplicates and inferred items, and the
+   actions extracted, then get approval per `review.mode`. Write nothing in `source` or `batch` mode before the review
+   is approved.
 4. Write the source summary pages and create or edit the wiki pages. A changed source updates its existing summary.
-5. `done <batch-id>`: mark the sources ingested, regenerate indexes, append the log.
+   Write the approved tasks to `.okf-ingest/batches/<batch-id>/tasks.json` (none: no file).
+5. `done <batch-id>`: mark the sources ingested, regenerate indexes, merge the batch tasks into `.okf/tasks.json`,
+   append the log. It refuses the batch, writing nothing, when a task is invalid or its source is older than
+   `tasks.max_age_days`.
 6. `validate`: fix every error before the next batch. Never commit automatically; suggest one commit per batch.
 
 ## Log format
@@ -69,4 +83,5 @@ Meetings, 1:1s and training notes are sources, not wiki pages. Their content flo
 
 `* **Ingest**: [<source title>](sources/<file>.md) - <N> pages updated`
 
-where N counts the links in the summary page's Pages updated list.
+where N counts the links in the summary page's Pages updated list. When M tasks from the source were merged, the line
+ends `, M actions` (`, 1 action`). Task state changes (`task done`, `defer`, `delegate`, `drop`) never touch the log.

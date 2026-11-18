@@ -1,3 +1,4 @@
+import json
 import subprocess
 from collections.abc import Callable
 from datetime import date
@@ -9,6 +10,7 @@ from okfmig.brain import BrainSettings, init_brain
 from okfmig.frontmatter import parse
 from okfmig.ingest import BatchError, complete_batch, pages_updated, similar_pages
 from okfmig.snapshot import load_batches, load_ledger, take_snapshot
+from okfmig.tasks import load_store
 
 Files = dict[str, str | bytes]
 TODAY = date(2026, 11, 17)
@@ -333,3 +335,77 @@ def test_done_rerun_after_crash_logs_each_source_once(
     log = (brain / "log.md").read_text(encoding="utf-8")
     assert log.count(line) == 1
     assert load_batches(brain) == []
+
+
+def _write_batch_tasks(brain: Path, entries: list[dict]) -> Path:
+    path = brain / ".okf-ingest" / "batches" / "b001" / "tasks.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(entries), encoding="utf-8")
+    return path
+
+
+def _two_entries(quote: str = "We use embeddings for RAG.") -> list[dict]:
+    origin = "vault:Onboarding.md"
+    return [
+        {"origin": origin, "text": "Review the embeddings notes", "quote": quote},
+        {"origin": origin, "text": "Share the RAG summary", "quote": quote},
+    ]
+
+
+def test_done_merges_tasks_and_counts_actions(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _brain(tmp_path, make_vault, {"Onboarding.md": ONBOARDING})
+    _write(brain, {SUMMARY: SUMMARY_TEXT})
+    _write_batch_tasks(brain, _two_entries())
+
+    [line] = complete_batch(brain, "b001", TODAY)
+
+    assert len(load_store(brain).tasks) == 2
+    assert line.endswith("- 2 pages updated, 2 actions")
+    assert not (brain / ".okf-ingest" / "batches" / "b001").exists()
+
+
+def test_done_singular_action(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _brain(tmp_path, make_vault, {"Onboarding.md": ONBOARDING})
+    _write(brain, {SUMMARY: SUMMARY_TEXT})
+    _write_batch_tasks(brain, _two_entries()[:1])
+
+    [line] = complete_batch(brain, "b001", TODAY)
+
+    assert line.endswith("- 2 pages updated, 1 action")
+
+
+def test_done_without_tasks_file_unchanged(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _brain(tmp_path, make_vault, {"Onboarding.md": ONBOARDING})
+    _write(brain, {SUMMARY: SUMMARY_TEXT})
+
+    [line] = complete_batch(brain, "b001", TODAY)
+
+    assert line.endswith("pages updated")
+    assert not (brain / ".okf" / "tasks.json").exists()
+
+
+def test_done_refuses_bad_tasks_before_writing(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _brain(tmp_path, make_vault, {"Onboarding.md": ONBOARDING})
+    _write(brain, {SUMMARY: SUMMARY_TEXT})
+    _write_batch_tasks(brain, _two_entries("not in the snapshot"))
+    before = _tree(brain)
+
+    with pytest.raises(BatchError, match="quote"):
+        complete_batch(brain, "b001", TODAY)
+    assert _tree(brain) == before
+
+
+def test_done_rerun_after_crash_merges_once(
+    tmp_path: Path, make_vault: Callable[[Files], Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    brain = _brain(tmp_path, make_vault, {"Onboarding.md": ONBOARDING})
+    _write(brain, {SUMMARY: SUMMARY_TEXT})
+    _write_batch_tasks(brain, _two_entries())
+    _fail_once(monkeypatch, "save_ledger")
+
+    with pytest.raises(OSError, match="simulated crash"):
+        complete_batch(brain, "b001", TODAY)
+    [line] = complete_batch(brain, "b001", TODAY)
+
+    assert len(load_store(brain).tasks) == 2
+    assert (brain / "log.md").read_text(encoding="utf-8").count(line) == 1
