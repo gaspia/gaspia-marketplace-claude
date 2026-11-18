@@ -37,7 +37,7 @@ def _read_settings(root: Path) -> ObsidianSettings:
     default = ObsidianSettings(PurePosixPath("."))
     try:
         data = json.loads((root / ".obsidian" / "app.json").read_text(encoding="utf-8"))
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return default
     if isinstance(data, dict) and data.get("newFileLocation") == "folder":
         folder = data.get("newFileFolderPath")

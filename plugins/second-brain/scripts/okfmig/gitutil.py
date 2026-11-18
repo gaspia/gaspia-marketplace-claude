@@ -25,7 +25,7 @@ def is_repo(root: Path) -> bool:
     """True only when `root` is the top-level of a git work tree."""
     try:
         top = _git(root, "rev-parse", "--show-toplevel").strip()
-    except subprocess.CalledProcessError, OSError:
+    except (subprocess.CalledProcessError, OSError):
         return False
     return Path(top).resolve() == root.resolve()
 
@@ -71,7 +71,7 @@ def repo_location(folder: Path) -> tuple[Path, PurePosixPath] | None:
     letter case git and the file system use; None outside a work tree."""
     try:
         top, prefix, *_ = [*_git(folder, "rev-parse", "--show-toplevel", "--show-prefix").split("\n"), "", ""]
-    except subprocess.CalledProcessError, OSError:
+    except (subprocess.CalledProcessError, OSError):
         return None
     if not top:
         return None

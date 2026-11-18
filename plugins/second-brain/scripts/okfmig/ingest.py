@@ -38,7 +38,7 @@ def _normalize(text: str) -> str:
 def _read_meta(path: Path) -> dict:
     try:
         data = parse(path.read_bytes().decode("utf-8")).data
-    except OSError, UnicodeDecodeError:
+    except (OSError, UnicodeDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
 
