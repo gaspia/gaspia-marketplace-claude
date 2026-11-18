@@ -65,11 +65,15 @@ Meetings, 1:1s and training notes are sources, not wiki pages. Their content flo
 
 1. `snapshot`: copy new and changed sources into `raw/<source-name>/`, update the ledger, write the batches.
 2. `next`: print the next batch. Read `index.md`, each snapshot (or its diff against the previous snapshot) and the
-   pages it may touch. Run `similar` before proposing any new page.
-3. Review: draft the takeaways, the pages to create or update, possible duplicates and inferred items, then get
-   approval per `review.mode`. Write nothing in `source` or `batch` mode before the review is approved.
+   pages it may touch. Run `similar` before proposing any new page and `task-similar` before proposing any task.
+3. Review: draft the takeaways, the pages to create or update, possible duplicates and inferred items, and the
+   actions extracted, then get approval per `review.mode`. Write nothing in `source` or `batch` mode before the review
+   is approved.
 4. Write the source summary pages and create or edit the wiki pages. A changed source updates its existing summary.
-5. `done <batch-id>`: mark the sources ingested, regenerate indexes, append the log.
+   Write the approved tasks to `.okf-ingest/batches/<batch-id>/tasks.json` (none: no file).
+5. `done <batch-id>`: mark the sources ingested, regenerate indexes, merge the batch tasks into `.okf/tasks.json`,
+   append the log. It refuses the batch, writing nothing, when a task is invalid or its source is older than
+   `tasks.max_age_days`.
 6. `validate`: fix every error before the next batch. Never commit automatically; suggest one commit per batch.
 
 ## Log format
@@ -78,4 +82,5 @@ Meetings, 1:1s and training notes are sources, not wiki pages. Their content flo
 
 `* **Ingest**: [<source title>](sources/<file>.md) - <N> pages updated`
 
-where N counts the links in the summary page's Pages updated list.
+where N counts the links in the summary page's Pages updated list. When M tasks from the source were merged, the line
+ends `, M actions` (`, 1 action`). Task state changes (`task done`, `defer`, `delegate`, `drop`) never touch the log.
