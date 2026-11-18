@@ -318,3 +318,45 @@ def test_load_batch_tasks_missing_and_bad(tmp_path: Path):
         load_batch_tasks(tmp_path, "b001")
     path.write_text(json.dumps([{"origin": "o", "text": "t", "quote": "q"}]), encoding="utf-8")
     assert load_batch_tasks(tmp_path, "b001") == [BatchTask("o", "t", "q")]
+
+
+def test_merge_is_idempotent_with_several_entries_for_one_task():
+    existing = _task(id="aaaaaaaa", text="Write up the routing decision")
+    store = _store(existing)
+    batch = Batch(
+        "b001",
+        [
+            BatchItem("vault:One.md", "raw/vault/One.md", "new", None, "sources/2026-11-17-one.md"),
+            BatchItem("vault:Two.md", "raw/vault/Two.md", "new", None, "sources/2026-11-17-two.md"),
+        ],
+    )
+    entries = [
+        _entry(origin="vault:One.md", text="Write the routing decision", due="2026-11-20", same_as="aaaaaaaa"),
+        _entry(
+            origin="vault:Two.md", text="Write up the gateway routing decision", due="2026-11-21", same_as="aaaaaaaa"
+        ),
+    ]
+    merge_batch_tasks(store, batch, entries, SETTINGS, TODAY)
+    assert store.tasks["aaaaaaaa"].updated == "2026-11-18"
+    merge_batch_tasks(store, batch, entries, SETTINGS, date(2026, 11, 25))
+    assert store.tasks["aaaaaaaa"].updated == "2026-11-18"
+
+
+def test_check_refuses_wrongly_typed_values(tmp_path: Path):
+    brain = _brain(tmp_path)
+    entries = [
+        _entry(page=5),
+        _entry(inferred=[["due"]]),
+        _entry(same_as=["x"]),
+        _entry(owner=7),
+        _entry(due=20261121),
+        _entry(text=None),
+    ]
+    with pytest.raises(TaskError) as exc:
+        check_batch_tasks(brain, _batch(), entries, TaskStore(), SETTINGS, TODAY)
+    lines = str(exc.value).splitlines()
+    assert len(lines) == 6
+    assert "page must be a string or null" in lines[0]
+    assert "inferred must be a list of strings" in lines[1]
+    assert "same_as must be a string or null" in lines[2]
+    assert "owner must be a string or null" in lines[3]

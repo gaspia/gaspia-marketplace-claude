@@ -198,16 +198,32 @@ def _file_problem(brain: Path, rel: str, label: str) -> str | None:
     return None
 
 
+def _type_problems(entry: BatchTask) -> list[str]:
+    problems = [
+        f"{name} must be a string" for name in ("origin", "text", "quote") if not isinstance(getattr(entry, name), str)
+    ]
+    problems += [
+        f"{name} must be a string or null"
+        for name in ("owner", "due", "page", "same_as")
+        if getattr(entry, name) is not None and not isinstance(getattr(entry, name), str)
+    ]
+    if not isinstance(entry.inferred, list) or not all(isinstance(name, str) for name in entry.inferred):
+        problems.append("inferred must be a list of strings")
+    return problems
+
+
 def _entry_problems(  # noqa: PLR0912, PLR0913, PLR0917
     brain: Path, batch: Batch, entry: BatchTask, store: TaskStore, settings: BrainSettings, today: date
 ) -> list[str]:
-    problems = []
+    problems = _type_problems(entry)
+    if problems:
+        return problems
     item = next((i for i in batch.items if i.origin == entry.origin), None)
     if item is None:
         problems.append(f"origin is not in batch {batch.id}")
-    if not isinstance(entry.text, str) or not normalize_text(entry.text):
+    if not normalize_text(entry.text):
         problems.append("text is empty")
-    if not isinstance(entry.quote, str) or not collapse_whitespace(entry.quote):
+    if not collapse_whitespace(entry.quote):
         problems.append("quote is empty")
     elif item is not None:
         try:
@@ -220,10 +236,10 @@ def _entry_problems(  # noqa: PLR0912, PLR0913, PLR0917
     if entry.due is not None:
         try:
             date.fromisoformat(entry.due)
-        except TypeError, ValueError:
+        except ValueError:
             problems.append(f"due is not an ISO date: {entry.due!r}")
     if entry.owner is not None:
-        if not isinstance(entry.owner, str) or not entry.owner.strip():
+        if not entry.owner.strip():
             problems.append("owner is empty")
         elif entry.owner.startswith("people/"):
             problem = _file_problem(brain, entry.owner, "owner page")
@@ -233,7 +249,7 @@ def _entry_problems(  # noqa: PLR0912, PLR0913, PLR0917
         problem = _file_problem(brain, entry.page, "page")
         if problem:
             problems.append(problem)
-    if not isinstance(entry.inferred, list) or not set(entry.inferred) <= set(FIELDS):
+    if not set(entry.inferred) <= set(FIELDS):
         problems.append(f"inferred must be a subset of {list(FIELDS)}")
     if entry.same_as is not None and entry.same_as not in store.tasks:
         problems.append(f"same_as names no task: {entry.same_as}")
@@ -253,7 +269,7 @@ def _age_and_collision_problems(
     else:
         if summary_date < today - timedelta(days=settings.tasks_max_age_days):
             problems.append(f"source is too old ({summary_date.isoformat()}, limit {settings.tasks_max_age_days} days)")
-    if entry.same_as is None and isinstance(entry.text, str):
+    if entry.same_as is None:
         existing = store.tasks.get(task_id(entry.origin, entry.text))
         if existing is not None and all(source.origin != entry.origin for source in existing.sources):
             problems.append(f"id collision with task {existing.id}")
@@ -278,6 +294,7 @@ def merge_batch_tasks(
     """Apply checked entries to `store` in file order; returns entries merged per origin."""
     counts: dict[str, int] = {}
     stamp = today.isoformat()
+    initial: dict[str, dict] = {}
     for entry in entries:
         item = next(i for i in batch.items if i.origin == entry.origin)
         inferred = list(entry.inferred)
@@ -304,15 +321,18 @@ def merge_batch_tasks(
                 closed=None,
             )
         else:
-            _merge_existing(task, entry, item.raw_path, quote, owner, inferred, stamp)
+            initial.setdefault(tid, asdict(task))
+            _merge_existing(task, entry, item.raw_path, quote, owner, inferred)
         counts[entry.origin] = counts.get(entry.origin, 0) + 1
+    for tid, before in initial.items():
+        if asdict(store.tasks[tid]) != before:
+            store.tasks[tid].updated = stamp
     return counts
 
 
 def _merge_existing(  # noqa: PLR0913, PLR0917
-    task: Task, entry: BatchTask, raw_path: str, quote: str, owner: str, inferred: list[str], stamp: str
+    task: Task, entry: BatchTask, raw_path: str, quote: str, owner: str, inferred: list[str]
 ) -> None:
-    before = asdict(task)
     task.text = entry.text
     if entry.page is not None:
         task.page = entry.page
@@ -332,5 +352,3 @@ def _merge_existing(  # noqa: PLR0913, PLR0917
             task.inferred.remove(name)
     if task.status in ACTIVE and "owner" not in task.manual:
         task.status = "open" if task.owner == "me" else "waiting"
-    if asdict(task) != before:
-        task.updated = stamp
