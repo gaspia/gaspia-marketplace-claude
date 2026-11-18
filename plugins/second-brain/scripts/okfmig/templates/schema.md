@@ -51,6 +51,15 @@ Meetings, 1:1s and training notes are sources, not wiki pages. Their content flo
 - `people.personal`: write `## Personal` sections (family, interests, personal context) on person pages only when true.
 - `people.performance`: write `## Performance` sections (feedback, self-assessments, growth areas) only when true.
   Turning a setting off stops new content of that kind; it does not remove existing sections.
+- `tasks.stale_days`: an open task with no state change for this many days shows in today's stale bucket (default 14).
+- `tasks.default_owner`: owner when a source states a commitment with no actor (default `me`).
+- `tasks.max_age_days`: sources older than this at ingest yield no tasks (default 30).
+
+## Tasks
+
+- The store is `.okf/tasks.json`, written only by `okf_brain.py`.
+- Extraction follows `references/task-rules.md` of the ingest skill.
+- Never edit the store by hand.
 
 ## Ingest workflow
 
