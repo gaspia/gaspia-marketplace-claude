@@ -351,15 +351,15 @@ def merge_batch_tasks(
     initial: dict[str, dict] = {}
     for entry in entries:
         item = next(i for i in batch.items if i.origin == entry.origin)
-        inferred = list(entry.inferred)
-        owner = entry.owner
-        if owner is None:
-            owner = settings.tasks_default_owner
-            inferred.append("owner")
         quote = collapse_whitespace(entry.quote)
         tid = entry.same_as or task_id(entry.origin, entry.text)
         task = store.tasks.get(tid)
         if task is None:
+            inferred = list(entry.inferred)
+            owner = entry.owner
+            if owner is None:  # default_owner only for a new task; an update keeps the stored owner
+                owner = settings.tasks_default_owner
+                inferred.append("owner")
             store.tasks[tid] = Task(
                 id=tid,
                 text=entry.text,
@@ -376,7 +376,7 @@ def merge_batch_tasks(
             )
         else:
             initial.setdefault(tid, asdict(task))
-            _merge_existing(task, entry, item.raw_path, quote, owner, inferred)
+            _merge_existing(task, entry, item.raw_path, quote)
         counts[entry.origin] = counts.get(entry.origin, 0) + 1
     for tid, before in initial.items():
         if asdict(store.tasks[tid]) != before:
@@ -384,9 +384,8 @@ def merge_batch_tasks(
     return counts
 
 
-def _merge_existing(  # noqa: PLR0913, PLR0917
-    task: Task, entry: BatchTask, raw_path: str, quote: str, owner: str, inferred: list[str]
-) -> None:
+def _merge_existing(task: Task, entry: BatchTask, raw_path: str, quote: str) -> None:
+    """Update a stored task; a null `owner` or `due` keeps the stored value and its inferred flag."""
     task.text = entry.text
     if entry.page is not None:
         task.page = entry.page
@@ -396,13 +395,14 @@ def _merge_existing(  # noqa: PLR0913, PLR0917
     else:
         source.raw_path = raw_path
         source.quote = quote
-    for name, value in (("owner", owner), ("due", entry.due)):
-        if name in task.manual:
+    for name in FIELDS:
+        value = getattr(entry, name)
+        if value is None or name in task.manual:
             continue
         setattr(task, name, value)
-        if name in inferred and name not in task.inferred:
+        if name in entry.inferred and name not in task.inferred:
             task.inferred.append(name)
-        elif name not in inferred and name in task.inferred:
+        elif name not in entry.inferred and name in task.inferred:
             task.inferred.remove(name)
-    if task.status in ACTIVE and "owner" not in task.manual:
+    if entry.owner is not None and task.status in ACTIVE and "owner" not in task.manual:
         task.status = "open" if task.owner == "me" else "waiting"

@@ -437,6 +437,7 @@ def test_ingest_with_actions_then_corrected(
     store = load_store(brain)
     assert len(store.tasks) == 2
     assert store.tasks[first.id].text == "Write up the Private Gateway routing decision"
+    assert len(store.tasks[first.id].sources) == 1
     assert store.tasks[first.id].sources[0].quote == REWORDED_ACTION
 
     assert main(["task", str(brain), "done", first.id, "--today", "2026-11-18"]) == 0

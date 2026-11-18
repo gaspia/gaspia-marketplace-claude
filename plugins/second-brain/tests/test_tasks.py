@@ -297,6 +297,30 @@ def test_merge_respects_manual():
     assert store.tasks[tid].sources == [TaskSource(ORIGIN, "raw/vault/Sync.md", "write up the routing decision")]
 
 
+def test_merge_same_as_null_due_keeps_due():
+    existing = _task(id="aaaaaaaa", due="2026-11-20", inferred=["due"])
+    store = _store(existing)
+    merge_batch_tasks(store, _batch(), [_entry(owner="me", same_as="aaaaaaaa")], SETTINGS, TODAY)
+    assert store.tasks["aaaaaaaa"].due == "2026-11-20"
+    assert store.tasks["aaaaaaaa"].inferred == ["due"]
+
+
+def test_merge_null_owner_keeps_waiting_owner():
+    existing = _task(id="aaaaaaaa", owner="Ana", status="waiting", inferred=["owner"])
+    store = _store(existing)
+    merge_batch_tasks(store, _batch(), [_entry(same_as="aaaaaaaa")], SETTINGS, TODAY)
+    task = store.tasks["aaaaaaaa"]
+    assert (task.owner, task.status, task.inferred) == ("Ana", "waiting", ["owner"])
+
+
+def test_merge_stated_owner_clears_inferred_flag():
+    existing = _task(id="aaaaaaaa", owner="Ana", status="waiting", inferred=["owner"])
+    store = _store(existing)
+    merge_batch_tasks(store, _batch(), [_entry(owner="me", same_as="aaaaaaaa")], SETTINGS, TODAY)
+    task = store.tasks["aaaaaaaa"]
+    assert (task.owner, task.status, task.inferred) == ("me", "open", [])
+
+
 def test_merge_keeps_closed_task_closed():
     tid = task_id(ORIGIN, "Write up the routing decision")
     existing = _task(id=tid, status="done", closed="2026-11-10", sources=[TaskSource(ORIGIN, "r", "q")])

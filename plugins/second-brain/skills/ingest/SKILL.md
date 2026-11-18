@@ -59,7 +59,7 @@ git -C "<brain>" clean -nd -- .    # preview what would be deleted
 git -C "<brain>" clean -fd -- .
 ```
 
-Show the preview to the user before the final command. This reverts pages, indexes, log, ledger, task store and any uncommitted snapshots, but not the git-excluded batch queue. Then delete `<brain>/.okf-ingest/batches.json` and run `snapshot` again on the same source: everything not ingested in the committed ledger is queued again.
+Show the preview to the user before the final command. This reverts pages, indexes, log, ledger, task store and any uncommitted snapshots, but not the git-excluded batch queue. Then delete `<brain>/.okf-ingest/batches.json` and run `snapshot` again on the same source: everything not ingested in the committed ledger is queued again. With no batch pending, `snapshot` also deletes the leftover batch action files (`.okf-ingest/batches/<id>/tasks.json`), so a later batch with the same id never merges them.
 
 ## Re-runs
 

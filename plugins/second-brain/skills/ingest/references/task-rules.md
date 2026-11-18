@@ -22,6 +22,8 @@ Read this before extracting any action item. Tasks are the user's follow-ups, ke
 
 ## Fields
 
+`origin`, `text` and `quote` are required strings. `owner`, `due`, `page` and `same_as` are strings or `null`, and `inferred` is a list of strings; all four may be omitted (null, or an empty list). No other keys are allowed: a typo such as `sameAs` refuses the batch, and so does a value of the wrong type.
+
 - **`origin`**: the source's `origin` exactly as `next` prints it. It must be in the batch.
 - **`text`**: the task as a short imperative ("Write up the routing decision"), without the owner or the date.
 - **`quote`**: the citation. A short verbatim span of the snapshot that states the commitment, copied from the file under `raw/`. Line breaks and runs of spaces may differ; every other character must match, case included. A task with no quote, or one that is not in the snapshot, is refused.
@@ -29,6 +31,7 @@ Read this before extracting any action item. Tasks are the user's follow-ups, ke
 - **`due`**: an ISO date (`2026-11-20`), only when the source states one. A relative date ("by Friday") resolves against the source's date, not today, and puts `due` in `inferred`. No stated date: `null`.
 - **`page`**: the project or area page the task belongs to (`projects/<slug>.md`, from the brain root), only when the source states which one and the page exists (or you write it in this batch). Else `null`.
 - **`inferred`**: the fields you resolved rather than copied: a subset of `["owner", "due"]`.
+- **On an update** (`same_as`, or a task already in the store): a `null` `owner` or `due` keeps the stored value and its inferred flag, so leave a field `null` when this source does not state it.
 - **`same_as`**: the id of an existing task this entry is, when the user answered "same task" (below). Else `null`.
 
 ## Duplicates
@@ -49,7 +52,7 @@ Write `.okf-ingest/batches/<batch-id>/tasks.json` before running `done`: a JSON 
     "quote": "Paulo to write up the routing decision by Friday.",
     "owner": "me",
     "due": "2026-11-20",
-    "page": "projects/private-gateway.md",
+    "page": null,
     "inferred": ["due"],
     "same_as": null
   },
@@ -66,12 +69,12 @@ Write `.okf-ingest/batches/<batch-id>/tasks.json` before running `done`: a JSON 
 ]
 ```
 
-`done` refuses the whole file, writing nothing, and lists every problem as `#<n> <origin>: <problem>` when an entry has: an origin not in the batch; empty `text`; a `quote` that is empty or not in the snapshot; a `due` that is not an ISO date; an empty `owner`, or a `people/` owner with no such page; a `page` that is not an existing file inside the brain; `inferred` naming anything but `owner` and `due`; a `same_as` naming no task; a source older than `tasks.max_age_days`; or a computed id that belongs to a task from another source (use `same_as`). Fix the file and re-run `done`.
+`done` refuses the whole file, writing nothing. A file it cannot load (not JSON, not a list, an entry that is not an object, a missing required key or an unknown key) is reported as `batch <id>: <path>: <problem>`, for an entry `batch <id>: <path>: entry <n>: <problem>`. Otherwise it lists every problem as `#<n> <origin>: <problem>` when an entry has: a value of the wrong type; an origin not in the batch; empty `text`; a `quote` that is empty or not in the snapshot; a snapshot it cannot read; a summary page with no date prefix; a `due` that is not an ISO date; an empty `owner`, or a `people/` owner with no such page; a `page` that is not an existing file inside the brain; `inferred` naming anything but `owner` and `due`; a `same_as` naming no task; a source older than `tasks.max_age_days`; or a computed id that belongs to a task from another source (use `same_as`). Fix the file and re-run `done`.
 
 How `done` merges each entry:
 
-- **`same_as`, or an id already in the store:** updates `text`, `page` (when given), and the entry's source and quote, adding the source when it is new. `owner` and `due` are replaced by the entry's values unless the user set them by hand (`task delegate`, `task defer`), so repeat them on every update. `status` stays, except that an open or waiting task follows its owner.
-- **Otherwise:** a new task, `open` when the owner is `me`, `waiting` otherwise.
+- **`same_as`, or an id already in the store:** updates `text`, `page` (when given), and the entry's source and quote, adding the source when it is new. A stated `owner` or `due` replaces the stored one, with its inferred flag, unless the user set it by hand (`task delegate`, `task defer`: the field is in `manual`). A `null` one keeps the stored value and its flag. `status` stays, except that a stated owner moves an open or waiting task to `open` (owner `me`) or `waiting` (anyone else), unless the user delegated it (owner in `manual`).
+- **Otherwise:** a new task. A `null` owner becomes `tasks.default_owner`, marked inferred. The task is `open` when the owner is `me`, `waiting` otherwise.
 
 Merging is idempotent: re-running `done` after a crash duplicates nothing.
 
@@ -90,5 +93,5 @@ Add an "Actions extracted" section per source, after the pages:
 - A `quote` paraphrased or fixed up: `done` refuses it. Copy it from the snapshot.
 - A relative date resolved against today: resolve it against the source's date.
 - Turning a team's bug or ticket into a task: it is Jira work.
-- Leaving `due` out of an update entry: it clears the due date the source gave.
+- A key spelled differently (`sameAs`, `due_date`): `done` refuses the batch.
 - A bare name as `owner` while that person's page exists: use the `people/<slug>.md` path.
