@@ -1,22 +1,33 @@
 """Ingest helpers: duplicate candidates for new pages and batch completion."""
 
 import re
+import shutil
 from datetime import date
 from difflib import SequenceMatcher
 from pathlib import Path, PurePosixPath
 
 from okfmig import typerules
 from okfmig.apply import BlockedPlanError, StaleFileError, apply_plan
-from okfmig.brain import WIKI_FOLDERS
+from okfmig.brain import WIKI_FOLDERS, load_settings
 from okfmig.frontmatter import parse
 from okfmig.gitutil import commit_times_under, has_changes, ignored_under, repo_location
 from okfmig.links import linked_paths, relative_href
 from okfmig.planner import build_plan
 from okfmig.reserved import add_log_entry, has_log_entry
 from okfmig.snapshot import PREVIOUS, Batch, LedgerEntry, load_batches, load_ledger, save_batches, save_ledger
+from okfmig.tasks import (
+    BATCH_TASKS,
+    SIMILAR_RATIO,
+    BatchTask,
+    TaskError,
+    check_batch_tasks,
+    load_batch_tasks,
+    load_store,
+    merge_batch_tasks,
+    save_store,
+)
 from okfmig.vault import discover
 
-SIMILAR_RATIO = 0.75
 MIN_SUBSTRING = 3
 LOG = "log.md"
 SECTION_LEVEL = 2  # `## Pages updated` and the headings that end it (level 1 or 2)
@@ -107,13 +118,16 @@ def _escape_title(title: str) -> str:
     return re.sub(r"([\\\[\]])", r"\\\1", title)
 
 
-def _log_line(brain: Path, page: str) -> str:
+def _log_line(brain: Path, page: str, actions: int) -> str:
     text = (brain / page).read_bytes().decode("utf-8")
     path = PurePosixPath(page)
     title = _title(_read_meta(brain / page), path.stem)
     href = relative_href(PurePosixPath(LOG), path)
     count = pages_updated(text, path)
-    return f"* **Ingest**: [{_escape_title(title)}]({href}) - {count} pages updated"
+    line = f"* **Ingest**: [{_escape_title(title)}]({href}) - {count} pages updated"
+    if actions:
+        line += f", {actions} action{'' if actions == 1 else 's'}"
+    return line
 
 
 def _remove_previous(brain: Path, previous: str) -> None:
@@ -156,6 +170,13 @@ def _append_log(brain: Path, today: date, lines: list[str]) -> None:
         log.write_bytes(text.encode("utf-8"))
 
 
+def _batch_entries(brain: Path, batch: Batch) -> list[BatchTask]:
+    try:
+        return load_batch_tasks(brain, batch.id)
+    except TaskError as exc:
+        raise BatchError(f"batch {batch.id}: {exc}") from exc
+
+
 def complete_batch(brain: Path, batch_id: str, today: date) -> list[str]:
     """Mark a batch ingested: normalize pages and indexes, update the ledger, log one line per source.
 
@@ -168,6 +189,14 @@ def complete_batch(brain: Path, batch_id: str, today: date) -> list[str]:
         raise BatchError(f"unknown or already completed batch {batch_id!r}")
     ledger = load_ledger(brain)
     _check(brain, batch, ledger)
+    entries = _batch_entries(brain, batch)
+    if entries:  # no actions file: leave `.okf/tasks.json` alone
+        settings = load_settings(brain)
+        store = load_store(brain)
+        try:
+            check_batch_tasks(brain, batch, entries, store, settings, today)
+        except TaskError as exc:
+            raise BatchError(f"batch {batch_id}: {exc}") from exc
 
     cfg = typerules.load(brain / ".okf" / "types.yaml")
     vault = discover(brain, cfg.exclude, ignored_under(brain))
@@ -179,7 +208,11 @@ def complete_batch(brain: Path, batch_id: str, today: date) -> list[str]:
         apply_plan(brain, plan)
     except (BlockedPlanError, StaleFileError) as exc:
         raise BatchError(f"batch {batch_id}: {exc}") from exc
-    lines = [_log_line(brain, item.summary_page) for item in batch.items]  # after apply: normalized titles
+    counts: dict[str, int] = {}
+    if entries:
+        counts = merge_batch_tasks(store, batch, entries, settings, today)
+        save_store(brain, store)
+    lines = [_log_line(brain, item.summary_page, counts.get(item.origin, 0)) for item in batch.items]  # after apply
 
     for item in batch.items:
         entry = ledger[item.origin]
@@ -190,4 +223,5 @@ def complete_batch(brain: Path, batch_id: str, today: date) -> list[str]:
     for item in batch.items:
         if item.previous is not None:
             _remove_previous(brain, item.previous)
+    shutil.rmtree(brain / BATCH_TASKS / batch_id, ignore_errors=True)
     return lines

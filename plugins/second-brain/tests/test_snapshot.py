@@ -491,3 +491,14 @@ def test_pages_of_any_brain_never_sources(tmp_path: Path, make_vault: Callable[[
     assert result.attachments == 0
     with pytest.raises(ValueError, match="inside a brain"):
         take_snapshot(brain, other / "concepts/y.md", None, BATCH, TODAY)
+
+
+def test_snapshot_clears_leftover_batch_tasks(tmp_path: Path, make_vault: Callable[[Files], Path]) -> None:
+    brain = _brain(tmp_path)
+    leftover = brain / ".okf-ingest" / "batches" / "b001" / "tasks.json"
+    leftover.parent.mkdir(parents=True)
+    leftover.write_text("[]", encoding="utf-8")
+
+    take_snapshot(brain, make_vault({**OBSIDIAN, "A.md": "# A\n"}), None, BATCH, TODAY)
+
+    assert not leftover.exists()

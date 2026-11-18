@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+import shutil
 from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath
@@ -18,6 +19,7 @@ from okfmig.vault import Vault, discover
 LEDGER = PurePosixPath(".okf") / "sources.json"
 BATCHES = PurePosixPath(WORKDIR) / "batches.json"
 PREVIOUS = PurePosixPath(WORKDIR) / "previous"
+BATCH_WORK = PurePosixPath(WORKDIR) / "batches"
 SOURCES = "sources"
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -341,6 +343,8 @@ def take_snapshot(brain: Path, source: Path, name: str | None, settings: BrainSe
 
     ledger = load_ledger(brain)
     batches = load_batches(brain)
+    if not batches:  # nothing pending: per-batch files left by an abandoned batch are stale
+        shutil.rmtree(brain / BATCH_WORK, ignore_errors=True)
     pending = {item.origin for b in batches for item in b.items}
     taken = {e.summary_page for e in ledger.values()}
     today_iso = today.isoformat()

@@ -9,12 +9,12 @@ from difflib import SequenceMatcher
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-from okfmig.brain import WORKDIR, BrainSettings
-from okfmig.ingest import SIMILAR_RATIO
-from okfmig.snapshot import Batch, _read_json, _write_json
+from okfmig.brain import BrainSettings
+from okfmig.snapshot import BATCH_WORK, Batch, _read_json, _write_json
 
+SIMILAR_RATIO = 0.75
 STORE = PurePosixPath(".okf") / "tasks.json"
-BATCH_TASKS = PurePosixPath(WORKDIR) / "batches"
+BATCH_TASKS = BATCH_WORK
 
 Status = Literal["open", "waiting", "done", "dropped"]
 ACTIVE = ("open", "waiting")
