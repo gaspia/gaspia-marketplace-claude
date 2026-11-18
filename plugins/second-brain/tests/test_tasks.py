@@ -409,3 +409,46 @@ def test_buckets_new_since_last_run():
     assert (store.new_since, store.last_today) == ("2026-11-17", "2026-11-18")
     mark_today_run(store, TODAY)
     assert (store.new_since, store.last_today) == ("2026-11-17", "2026-11-18")
+
+
+_VALID_BODY = {
+    "text": "Write the doc",
+    "owner": "me",
+    "status": "open",
+    "due": None,
+    "sources": [{"origin": "vault:a.md", "raw_path": "raw/vault/a.md", "quote": "Write the doc"}],
+    "page": None,
+    "inferred": [],
+    "manual": [],
+    "created": "2026-11-17",
+    "updated": "2026-11-17",
+    "closed": None,
+}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "not a mapping",
+        {**_VALID_BODY, "text": 5},
+        {**_VALID_BODY, "due": 5},
+        {**_VALID_BODY, "inferred": "due"},
+        {**_VALID_BODY, "manual": [1]},
+        {**_VALID_BODY, "sources": "x"},
+        {**_VALID_BODY, "sources": ["x"]},
+        {**_VALID_BODY, "sources": [{**_VALID_BODY["sources"][0], "quote": None}]},
+    ],
+    ids=["body", "text", "due", "inferred", "manual-item", "sources-str", "source-item", "quote-null"],
+)
+def test_store_wrong_field_type(tmp_path: Path, body: object):
+    (tmp_path / ".okf").mkdir()
+    (tmp_path / ".okf" / "tasks.json").write_text(json.dumps({"tasks": {"aaaaaaaa": body}}), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"tasks\.json"):
+        load_store(tmp_path)
+
+
+def test_store_accepts_semantic_oddities(tmp_path: Path):
+    body = {**_VALID_BODY, "status": "later", "due": "Friday", "sources": []}
+    (tmp_path / ".okf").mkdir()
+    (tmp_path / ".okf" / "tasks.json").write_text(json.dumps({"tasks": {"XYZ": body}}), encoding="utf-8")
+    assert load_store(tmp_path).tasks["XYZ"].status == "later"
