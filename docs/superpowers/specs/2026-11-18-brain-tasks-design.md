@@ -1,7 +1,7 @@
 # Second Brain Tasks: Design
 
 Date: 2026-11-18
-Status: Draft, pending approval
+Status: Reviewed, pending approval
 
 ## Intent
 
@@ -24,11 +24,12 @@ The why: Paulo runs an engineering team, so most of his list is other people's c
 
 ## Non-goals
 
-- Replacing Jira, or any two-way sync with it (Phase 3, its own spec).
+- Replacing Jira, or any two-way sync with it (Phase 4, its own spec).
 - Recurring tasks, subtasks, dependencies, priorities, estimates, time tracking.
 - Parsing natural-language dates ("next week", "end of sprint").
 - Notifications, reminders, or anything that runs without Paulo asking.
-- Calendar integration (Phase 3).
+- Calendar integration (Phase 4).
+- The unattended daily path (Phase 3, its own spec; see Daily path).
 - Query and Lint operations (later skills, as in the ingest design).
 - Deleting tasks. Dropping one closes it; nothing is removed.
 
@@ -60,10 +61,13 @@ The why: Paulo runs an engineering team, so most of his list is other people's c
 
 - Tasks get their own layer rather than a seventh page type.
 - Extraction rides inside the existing ingest flow rather than a parallel workflow.
-- Three phases: (1) store, extraction, `today`, validation; (2) markdown round-trip, `agenda`, `digest`; (3) Calendar then a narrow Jira link.
+- Four phases: (1) store, extraction, `today`, validation; (2) markdown round-trip, `agenda`, `digest`; (3) the unattended daily path; (4) Calendar then a narrow Jira link.
+- The daily path may commit automatically, through `done --commit`, and only there. The bulk-import path keeps its review gate and manual commits.
 - Team-visible work lives in Jira; the brain holds only Paulo's own follow-ups.
 - Build rather than adopt, on the scan's finding that nothing reusable exists. The one piece worth plugging in rather than writing is capture (Granola Sync, if Paulo uses Granola).
 - Approach B.
+- Old sources do not produce tasks: only a source dated within `tasks.max_age_days` (default 30) of the ingest date is extracted from, so a bulk import of years of notes does not bury `today`.
+- The boundary with Jira: a delegated item becomes a `waiting` task only when it was committed to Paulo personally or he is the one who must chase it. Team backlog work (bugs, features, tickets the team tracks) is skipped.
 
 ## Design
 
@@ -82,7 +86,7 @@ The why: Paulo runs an engineering team, so most of his list is other people's c
   tasks/waiting.md       generated view, checkbox per delegated task
 ```
 
-`tasks/` is generated output, so it is excluded from the bundle in `.okf/types.yaml` alongside `raw/**` (designer's call). It therefore gets no frontmatter, no index, and no normalization from `done`, and a regenerated view never shows up as a wiki page or churns the indexes. The cost is that the views are not browsable from `index.md`; `today` is the real interface, and the views exist for ticking boxes on a phone.
+`tasks/` is generated output, so it is excluded from the bundle in `.okf/types.yaml` alongside `raw/**` (designer's call). The clean-tree check (`gitutil.dirty_under`) ignores `tasks/` as it ignores `.okf/`, so a ticked box or a re-rendered view never blocks the next `snapshot`. It therefore gets no frontmatter, no index, and no normalization from `done`, and a regenerated view never shows up as a wiki page or churns the indexes. The cost is that the views are not browsable from `index.md`; `today` is the real interface, and the views exist for ticking boxes on a phone.
 
 ### The task record
 
@@ -90,17 +94,20 @@ One entry per task in `.okf/tasks.json`:
 
 | Field | Meaning |
 | --- | --- |
-| `id` | First 8 hex characters of `sha256(origin + "\n" + normalized_text)`. Normalized text is casefolded, whitespace-collapsed, trailing punctuation stripped. |
+| `id` | First 8 hex characters of `sha256(origin + "\n" + normalized_text)`, computed once at creation from the first source and never recomputed. Normalized text is casefolded, whitespace-collapsed, trailing punctuation stripped. |
 | `text` | The commitment, as an imperative sentence. |
 | `owner` | `me`, a `people/<slug>.md` path, or a bare name when no person page exists. |
 | `status` | `open`, `waiting`, `done`, `dropped`. |
 | `due` | ISO date, or null. Never a guess. |
-| `origin`, `raw_path` | The source and its snapshot, in the ledger's `<source-name>:<relative path>` form. |
+| `sources` | One or more `{origin, raw_path, quote}`: the source and its snapshot in the ledger's `<source-name>:<relative path>` form, and a short verbatim quote of the commitment from that source. The first entry is the one the id came from. |
 | `page` | The project or area page this belongs to, when a source states one. |
 | `inferred` | Which of `owner` and `due` Claude inferred rather than read. |
-| `created`, `closed` | ISO dates. `closed` is null while open or waiting. |
+| `manual` | Which of `owner` and `due` Paulo set through a `task` transition. Re-ingest never overwrites these. |
+| `created`, `updated`, `closed` | ISO dates. `updated` is the last state or field change (drives the stale bucket). `closed` is null while open or waiting. |
 
-The id is derived rather than assigned so that re-snapshotting a corrected note produces the same id for an unchanged commitment, which is what makes re-ingest safe. A reworded commitment produces a new id, which is why `task-similar` exists.
+The id is derived at creation so that re-snapshotting a corrected note produces the same id for an unchanged commitment, which is what makes re-ingest safe without any lookup. It is then frozen: a reworded commitment, or the same commitment recorded in a second source, is attached to the existing task through an explicit `same_as` (below), never by recomputing the id (designer's call). This keeps "one task per commitment" true across rewording and across sources.
+
+The store also records the date `today` last ran, for its "new" bucket. The rest of the schema is left to the builder.
 
 ### Extraction contract
 
@@ -108,19 +115,27 @@ Claude writes `.okf-ingest/batches/<batch-id>/tasks.json` while processing the b
 
 - A task needs a stated commitment and an actor. "Paulo to write up the routing decision by Friday" is a task; "we should probably look at multi-infrastructure support sometime" is not. The same judgment as "when a page earns its place".
 - Cite the source. A task with no citation is a validation error, exactly as for a page.
+- Only Paulo's own follow-ups. A commitment by someone else is a task only when it was made to Paulo or he must chase it; team backlog work is Jira's and is listed as "not made tasks: Jira work".
+- Only recent sources. The source date is the one ingest already uses for the summary page; a source older than `tasks.max_age_days` yields no tasks, and its commitments are listed as "not made tasks: too old". An undated source is extracted from, and flagged as undated in the review draft (designer's call).
 - Record a due date only when the source states one. A relative date the source states ("by Friday") resolves against the source's own date and is marked inferred.
-- Resolve the owner to a person page when one exists, otherwise keep the bare name and mark it inferred.
-- Run `task-similar` before adding any task, in every review mode. Every hit is a duplicate question for Paulo, exactly as `similar` is for pages.
-- The review draft gains an "actions extracted" section listing, per source: tasks to create, tasks to update, items deliberately not made tasks, and the duplicate questions.
+- Resolve the owner to a person page when one exists, otherwise keep the bare name and mark it inferred. A commitment in Paulo's own notes with no stated actor ("send the deck to X") takes `default_owner`, marked inferred (designer's call); anything vaguer is not a task.
+- Run `task-similar` before adding any task, in every review mode. Every hit is a duplicate question for Paulo, exactly as `similar` is for pages. When he answers "same task", the batch entry carries `same_as: <id>`.
+- The review draft gains an "actions extracted" section listing, per source: tasks to create, tasks to update, items deliberately not made tasks (with the reason), and the duplicate questions.
 
-`done` merges by id: a known id updates `text` and `page` and leaves state alone; an unknown id is added as `open` (or `waiting` when the owner is not `me`). Merging is idempotent, so re-running after a crash completes the batch without duplicating, as `done` already does for pages.
+`done` merges each batch entry (designer's call):
+
+- `same_as: <id>`: updates `text` and `page` on that task, adds the source to `sources` if absent, and leaves `status`, and any field in `manual`, alone.
+- otherwise, the computed id is known: same update as above.
+- otherwise: added as `open` (or `waiting` when the owner is not `me`).
+
+`due` and `owner` from the source update the task only when not in `manual`. Merging is idempotent, so re-running after a crash completes the batch without duplicating, as `done` already does for pages. A `same_as` naming an unknown id refuses the batch.
 
 ### Commands
 
 Added to `okf_brain.py`:
 
 - `today <brain>`: five buckets, in order: overdue, due today, waiting on others, stale (no state change in N days, N from settings), new since the last run.
-- `task done|defer|delegate|drop <id> [--to <person>] [--until <date>]`: one state transition, written to the store. Refuses an unknown or already-closed id.
+- `task <brain> done|defer|delegate|drop <id> [--to <person>] [--until <date>]`: one state transition, written to the store, setting `updated`. Refuses an unknown or already-closed id. `defer --until` sets `due` and adds it to `manual` (it is no longer inferred). `delegate --to` sets `owner`, adds it to `manual`, and sets `waiting`; delegating to `me` sets `open`.
 - `task-similar <brain> "<text>"`: open and waiting tasks whose normalized text is close, reusing the `difflib` approach and the 0.75 threshold from `similar`.
 - `agenda <brain> <person>`: every open and waiting task owned by that person, with its source, for 1:1 preparation (Phase 2).
 - `digest <brain> --since <date>`: decisions recorded, tasks opened, tasks closed, in the period (Phase 2).
@@ -140,16 +155,20 @@ Task state changes do not touch `log.md` (designer's call). The log is the brain
 
 `validate` gains, as errors unless noted:
 
-- every task's `raw_path` exists under `raw/` and its `origin` is in the source ledger;
+- every task has at least one source; each source's `raw_path` exists under `raw/` and its `origin` is in the source ledger;
 - every `owner` that names a person page resolves to an existing file;
+- every `page` resolves to an existing wiki page;
 - every `due` parses as an ISO date;
-- ids are unique, and each matches the hash of its own `origin` and `text` (catches hand edits to the store);
-- no task references a summary page that no longer exists;
-- a warning for any open task whose source was re-ingested and whose text no longer appears in the current snapshot.
+- ids are unique and are 8 lowercase hex characters (they are frozen, so they are not re-hashed);
+- a warning for any open or waiting task where none of its sources' `quote`s appears in the current snapshot any more (whitespace-normalized), meaning the commitment may have been removed from the note.
 
-### Daily path
+### Daily path (Phase 3, its own spec)
 
-An `inbox/` folder in the brain, a `--mode` flag on `snapshot` and `done` overriding `review.mode` for one run, and a `/brain-daily` command that snapshots `inbox/`, ingests autonomously, runs `today`, and writes the result into Paulo's Obsidian daily note. The bulk-import path keeps its review gate; only the daily path runs unattended, and duplicate questions are still asked and surface in the morning output.
+The intent: an inbox folder, a `--mode` flag on `snapshot` and `done` overriding `review.mode` for one run, and a `/brain-daily` command that snapshots the inbox, ingests autonomously, runs `today`, and writes the result into Paulo's Obsidian daily note. The bulk-import path keeps its review gate; only the daily path runs unattended.
+
+Decided now: the daily path commits automatically through `done --commit`, one commit per batch, made only after the batch fully succeeds, with a pathspec limited to the brain folder (including `.okf/`) so nothing else staged in the repo is swept in, a message generated from the source names, and never a push. Each run therefore ends clean and the next morning's `snapshot` is not blocked. The ingest skill's hard rule becomes "never commit, except `done --commit` on the daily path".
+
+Left for the Phase 3 spec, because the current code blocks them: where the inbox lives (`snapshot` refuses a source inside a brain, and `done` refuses pages outside the wiki folders); what happens to processed inbox notes; where the daily note is and whether it is appended or a section replaced; and what an unattended run does with a duplicate question nobody is there to answer.
 
 ### Settings
 
@@ -158,6 +177,7 @@ Added to `.okf/brain.yaml`:
 ```yaml
 tasks:
   stale_days: 14     # no state change for this long shows in today's stale bucket
+  max_age_days: 30   # sources older than this at ingest yield no tasks
   default_owner: me  # owner when a source states a commitment with no actor
 ```
 
@@ -166,7 +186,7 @@ Missing keys mean these defaults, as elsewhere.
 ### Testing
 
 - Unit tests per new module: id derivation and normalization, merge by id (new, known, reworded), every state transition including refusals, `task-similar` thresholds, view rendering and the sync read-back, each validation check.
-- End-to-end with real git fixtures: ingest a source producing three candidate actions, re-snapshot it corrected, confirm one task updated and none duplicated; tick a box in a view and confirm `sync` closes exactly that task; confirm `tasks/` is excluded from indexes and `done` does not normalize it.
+- End-to-end with real git fixtures: ingest a source producing three candidate actions, re-snapshot it corrected, confirm one task updated and none duplicated; attach a reworded commitment with `same_as` and confirm its state and manual fields survive; confirm a ticked or re-rendered view does not block `snapshot`; tick a box in a view and confirm `sync` closes exactly that task; confirm `tasks/` is excluded from indexes and `done` does not normalize it.
 - The full existing suite still passes unchanged.
 - A rehearsal on scratch copies: ingest three real meeting notes, check every task cites its source, no invented tasks, and `today` and `agenda` read correctly.
 
