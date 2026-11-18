@@ -1,7 +1,7 @@
 {
   "name": "second-brain",
   "description": "Manage an Obsidian second brain in the Open Knowledge Format (OKF)",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "gaspia"
   }
